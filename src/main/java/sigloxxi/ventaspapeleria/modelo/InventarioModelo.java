@@ -18,7 +18,7 @@ import java.util.prefs.Preferences;
 
 public class InventarioModelo {
 
-    private boolean modoPruebas = true;
+    private boolean modoPruebas = false;
     private final DataFormatter dataFormatter = new DataFormatter();
 
     /** Constructor conservado para compatibilidad. Mantiene el modo de pruebas activado por defecto. */
