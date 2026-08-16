@@ -353,25 +353,10 @@ public class VentasController {
         ticket.append("         ¡Gracias por su compra!      \n");
         ticket.append("======================================\n");
 
-        // --- VENTANA EMERGENTE CON VISUALIZACIÓN DEL COMPROBANTE E IMPRESIÓN ---
-        JTextArea areaTicket = new JTextArea(ticket.toString());
-        areaTicket.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        areaTicket.setEditable(false);
-        areaTicket.setCaretPosition(0);
-
-        JScrollPane scrollTicket = new JScrollPane(areaTicket);
-        scrollTicket.setPreferredSize(new Dimension(360, 400));
-
-        JPanel panelEmergente = new JPanel(new BorderLayout(5, 10));
-        JLabel lblMensaje = new JLabel("¡Venta #" + String.format("%03d", contadorFacturas) + " registrada con éxito! ¿Desea imprimir la factura / comprobante?");
-        lblMensaje.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        panelEmergente.add(lblMensaje, BorderLayout.NORTH);
-        panelEmergente.add(scrollTicket, BorderLayout.CENTER);
-
         int opcionImprimir = JOptionPane.showConfirmDialog(
                 vista,
-                panelEmergente,
-                "Comprobante de Compra - Ticket #" + String.format("%06d", contadorFacturas),
+                "¡Venta #" + String.format("%03d", contadorFacturas) + " registrada con éxito!\n\n¿Desea imprimir la factura / comprobante de pago?",
+                "Imprimir Factura",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.QUESTION_MESSAGE
         );
@@ -548,7 +533,7 @@ public class VentasController {
                     return;
                 }
                 if (monto <= 0) {
-                    JOptionPane.showMessageDialog(dialogoPagos, "El monto a pagar calculado debe ser mayor a $0.00.", "Aviso", JOptionPane.WARNING_MESSAGE);
+                    JOptionPane.showMessageDialog(dialogoPagos, "El monto a pagar calculatedo debe ser mayor a $0.00.", "Aviso", JOptionPane.WARNING_MESSAGE);
                     return;
                 }
 
@@ -1199,19 +1184,9 @@ public class VentasController {
         }
 
         btnRelinkBD.addActionListener(e -> {
-            JFileChooser fileChooser = new JFileChooser();
-            fileChooser.setDialogTitle("Seleccionar nueva Base de Datos (.xlsx)");
-            fileChooser.setFileFilter(new FileNameExtensionFilter("Archivos de Excel (*.xlsx)", "xlsx"));
-
-            int selec = fileChooser.showOpenDialog(dialogoUpdates);
-            if (selec == JFileChooser.APPROVE_OPTION) {
-                File nuevo = fileChooser.getSelectedFile();
-                if (nuevo.exists()) {
-                    Preferences prefs = Preferences.userNodeForPackage(InventarioModelo.class);
-                    prefs.put("RUTA_EXCEL_INVENTARIO", nuevo.getAbsolutePath());
-                    JOptionPane.showMessageDialog(dialogoUpdates, "¡Base de datos vinculada correctamente!\n\n" + nuevo.getAbsolutePath(), "Actualizado", JOptionPane.INFORMATION_MESSAGE);
-                    dialogoUpdates.dispose();
-                }
+            boolean actualizado = modeloInventario.seleccionarNuevoArchivoExcel(vista);
+            if (actualizado) {
+                dialogoUpdates.dispose();
             }
         });
 

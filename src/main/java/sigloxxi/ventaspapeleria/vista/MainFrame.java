@@ -8,6 +8,7 @@ import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
+import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -30,33 +31,6 @@ public class MainFrame extends JFrame {
     public static final String RUTA_DINERO = RUTA_IMAGENES + "IMAGENES-DINERO/";
 
     // =========================================================================
-    // CENTRAL DE ICONOS DEL SISTEMA
-    // =========================================================================
-    public static final String ICONO_ACTUALIZAR = "ICONO-ACTUALIZAR.png";
-    public static final String ICONO_ENGRANAJE = "ICONO-ENGRANAGE.png";
-    public static final String ICONO_USUARIO = "ICONO-USUARIO.png";
-    public static final String ICONO_INTERROGACION = "ICONO-INTERROGACION.png";
-    public static final String ICONO_X = "ICONO-X.png";
-    public static final String ICONO_DESARROLLO_UPDATES = "ICONO-DESARROLLO-UPDATES.png";
-    public static final String ICONO_GUARDAR = "ICONO-GUARDAR.png";
-
-    // --- Ventas / operaciones ------------------------------------------------
-    public static final String ICONO_VALIDAR = "ICONO-VALIDAR.png";
-    public static final String ICONO_CARRITO_COMPRAS = "ICONO-CARRITO-COMPRAS.png";
-    public static final String ICONO_EXPORTAR = "ICONO-EXPORTAR.png";
-    public static final String ICONO_COBRAR = "ICONO-COBRAR.png";
-
-    // --- Empleados ------------------------------------------------------------
-    public static final String ICONO_PAGO_EMPLEADO = "ICONO-PAGO-EMPLEADO.png";
-
-    // --- Reportes -------------------------------------------------------------
-    public static final String ICONO_REPORTES = "ICONO-REPORTES.png";
-    public static final String ICONO_REPORTE_ANUAL = "ICONO-REPORTE-ANUAL.png";
-    public static final String ICONO_REPORTE_MENSUAL = "ICONO-REPORTE-MENSUAL.png";
-    public static final String ICONO_REPORTE_SEMANAL = "ICONO-REPORTE-SEMANAL.png";
-    public static final String ICONO_REPORTE_DIARIO = "ICONO-REPORTE-DIARIO.png";
-
-    // =========================================================================
     // PALETA DE COLORES CORPORATIVA Y ESTILOS DE INTERFAZ
     // =========================================================================
     public static final Color COLOR_PRIMARIO = new Color(41, 128, 185);
@@ -75,7 +49,7 @@ public class MainFrame extends JFrame {
     public static final Color COLOR_CONSOLA_TEXTO = new Color(46, 204, 113);
 
     // =========================================================================
-    // FUENTES TIPOGRÁFICAS
+    // FUENTES TIPOGRÁFICAS TIPOS DE LETRA DEL SISTEMA
     // =========================================================================
     public static final Font FUENTE_TITULO = new Font("Segoe UI", Font.BOLD, 20);
     public static final Font FUENTE_SUBTITULO = new Font("Segoe UI", Font.BOLD, 13);
@@ -99,7 +73,7 @@ public class MainFrame extends JFrame {
     private JMenuItem itemAcercaDe;
 
     // =========================================================================
-    // COMPONENTES DE BÚSQUEDA Y REGISTRO
+    // COMPONENTES DE BÚSQUEDA Y REGISTRO DE PRODUCTOS
     // =========================================================================
     private JTextField txtBusqueda;
     private JTextField txtCantidad;
@@ -116,16 +90,18 @@ public class MainFrame extends JFrame {
     private JScrollPane scrollTabla;
 
     // =========================================================================
-    // COMPONENTES DE CONSOLA Y LOGS
+    // COMPONENTES DE CONSOLA Y LOGS EN VIVO
     // =========================================================================
     private JTextArea txtConsolaVentas;
     private JScrollPane scrollConsola;
+    private JButton btnBorrarLog;
 
     // =========================================================================
     // COMPONENTES DE PANEL INFERIOR Y LIQUIDACIÓN
     // =========================================================================
     private JLabel lblTotal;
     private JLabel lblSubtotalTexto;
+    private JLabel lblCantidadItems;
     private JButton btnEliminarItem;
     private JButton btnCancelarVenta;
     private JButton btnExportarTxt;
@@ -142,12 +118,14 @@ public class MainFrame extends JFrame {
     private boolean modoPruebas = true;
 
     // =========================================================================
-    // CONSTRUCTORES
+    // CONSTRUCTORES PRINCIPALES
     // =========================================================================
+    /** Constructor sin argumentos conservado para compatibilidad con NetBeans. */
     public MainFrame() {
         this("SIN ASIGNAR", true);
     }
 
+    /** Constructor utilizado por el controlador principal MVC. */
     public MainFrame(String nombreEmpleado, boolean modoPruebas) {
         super("Papelería Siglo XXI - Sistema Profesional de Control de Ventas e Inventario");
         this.nombreEmpleadoActivo = (nombreEmpleado == null || nombreEmpleado.isBlank()) ? "SIN ASIGNAR" : nombreEmpleado.trim();
@@ -178,32 +156,59 @@ public class MainFrame extends JFrame {
         menuBar.setBackground(COLOR_OSCURO);
         menuBar.setPreferredSize(new Dimension(getWidth(), 35));
 
+        // Menú Opciones del Sistema
         menuOpciones = new JMenu("Opciones del Sistema");
         menuOpciones.setForeground(Color.WHITE);
         menuOpciones.setFont(FUENTE_SUBTITULO);
 
-        itemReportes = crearItemMenuConIcono("Centro de Reportes y Estadísticas", "Abrir el panel consolidado de ventas e informes (F12)", 20, 20, ICONO_REPORTES);
-        itemPagosEmpleados = crearItemMenuConIcono("Centro de Pago a Empleados", "Liquidación de comisiones y salarios diarios", 20, 20, ICONO_PAGO_EMPLEADO);
-        itemActualizaciones = crearItemMenuConIcono("Buscar Actualizaciones", "Verificar nuevas versiones del sistema", 20, 20, ICONO_ACTUALIZAR);
+        // Los textos permanecen sin emojis porque cada opción utiliza ahora
+        // su icono real almacenado en imagenes/ICONOS/.
+        itemReportes = crearItemMenuConIcono(
+                "Centro de Reportes y Estadísticas",
+                "Abrir el panel consolidado de ventas e informes (F12)",
+                20, 20,
+                "reportes", "reportes", "estadistica", "estadisticas");
+
+        itemPagosEmpleados = crearItemMenuConIcono(
+                "Centro de Pago a Empleados",
+                "Liquidación de comisiones y salarios diarios",
+                20, 20,
+                "pago", "empleado", "nomina", "salario");
+
+        itemActualizaciones = crearItemMenuConIcono(
+                "Buscar Actualizaciones",
+                "Verificar nuevas versiones del sistema",
+                20, 20,
+                "actualizar", "actualizacion", "actualizaciones", "update");
 
         menuOpciones.add(itemReportes);
         menuOpciones.add(itemPagosEmpleados);
         menuOpciones.addSeparator();
         menuOpciones.add(itemActualizaciones);
 
+        // Menú Herramientas
         menuHerramientas = new JMenu("Herramientas");
         menuHerramientas.setForeground(Color.WHITE);
         menuHerramientas.setFont(FUENTE_SUBTITULO);
 
-        itemLimpiarConsola = crearItemMenuConIcono("Limpiar Consola de Registros", "Borrar el historial visible en pantalla", 20, 20, ICONO_X);
+        itemLimpiarConsola = crearItemMenuConIcono(
+                "Limpiar Consola de Registros",
+                "Borrar el historial visible en pantalla",
+                20, 20,
+                "limpiar", "borrar", "clear", "consola");
         itemLimpiarConsola.addActionListener(e -> txtConsolaVentas.setText(""));
         menuHerramientas.add(itemLimpiarConsola);
 
+        // Menú Ayuda
         menuAyuda = new JMenu("Ayuda");
         menuAyuda.setForeground(Color.WHITE);
         menuAyuda.setFont(FUENTE_SUBTITULO);
 
-        itemAcercaDe = crearItemMenuConIcono("Acerca de Papelería Siglo XXI", "Información de la versión y desarrollador", 20, 20, ICONO_INTERROGACION);
+        itemAcercaDe = crearItemMenuConIcono(
+                "Acerca de Papelería Siglo XXI",
+                "Información de la versión y desarrollador",
+                20, 20,
+                "acerca", "about", "informacion", "informacion", "info");
         itemAcercaDe.addActionListener(e -> mostrarAcercaDe());
         menuAyuda.add(itemAcercaDe);
 
@@ -221,21 +226,28 @@ public class MainFrame extends JFrame {
         return item;
     }
 
-    private JMenuItem crearItemMenuConIcono(String texto, String tooltip, int anchoIcono, int altoIcono, String nombreIconoOClaves) {
+    /**
+     * Crea una opción de menú e intenta localizar automáticamente el icono
+     * correspondiente dentro de imagenes/ICONOS/.
+     *
+     * La búsqueda utiliza palabras clave en el nombre del archivo y prioriza
+     * el archivo más recientemente modificado. Esto permite reemplazar los
+     * iconos sin tener que cambiar nuevamente todo el código Java.
+     */
+    private JMenuItem crearItemMenuConIcono(String texto, String tooltip,
+                                            int anchoIcono, int altoIcono,
+                                            String... palabrasClave) {
         JMenuItem item = crearItemMenu(texto, tooltip);
-        if (nombreIconoOClaves != null && !nombreIconoOClaves.isBlank()) {
-            ImageIcon icono = cargarIcono(RUTA_ICONOS + nombreIconoOClaves, anchoIcono, altoIcono);
-            if (icono == null) {
-                String rutaIcono = buscarRutaIconoPorPalabras(nombreIconoOClaves.replace(".png", "").replace("ICONO-", ""));
-                if (rutaIcono != null) {
-                    icono = cargarIcono(rutaIcono, anchoIcono, altoIcono);
-                }
-            }
+
+        String rutaIcono = buscarRutaIconoPorPalabras(palabrasClave);
+        if (rutaIcono != null) {
+            ImageIcon icono = cargarIcono(rutaIcono, anchoIcono, altoIcono);
             if (icono != null) {
                 item.setIcon(icono);
                 item.setIconTextGap(8);
             }
         }
+
         return item;
     }
 
@@ -267,6 +279,7 @@ public class MainFrame extends JFrame {
         JPanel panelCabecera = new JPanel(new BorderLayout(8, 8));
         panelCabecera.setOpaque(false);
 
+        // Barra Superior de Marca y Reloj
         JPanel panelInfoEmpresa = new JPanel(new BorderLayout());
         panelInfoEmpresa.setBackground(COLOR_OSCURO);
         panelInfoEmpresa.setBorder(BorderFactory.createEmptyBorder(8, 15, 8, 15));
@@ -283,6 +296,7 @@ public class MainFrame extends JFrame {
         panelInfoEmpresa.add(lblTitulo, BorderLayout.WEST);
         panelInfoEmpresa.add(lblReloj, BorderLayout.EAST);
 
+        // Panel de Entrada y Formulario de Búsqueda
         JPanel panelEntrada = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
         panelEntrada.setBackground(COLOR_PANEL);
         panelEntrada.setBorder(BorderFactory.createTitledBorder(
@@ -313,8 +327,8 @@ public class MainFrame extends JFrame {
         txtCantidad.setFont(FUENTE_TEXTO);
         txtCantidad.setHorizontalAlignment(JTextField.CENTER);
 
-        btnValidar = crearBotonEstilizado(" Validar Info", ICONO_VALIDAR, COLOR_OSCURO, Color.WHITE);
-        btnAgregar = crearBotonEstilizado(" Agregar al Carrito", ICONO_CARRITO_COMPRAS, COLOR_EXITO, Color.WHITE);
+        btnValidar = crearBotonEstilizado("🔍 Validar Info", COLOR_OSCURO, Color.WHITE);
+        btnAgregar = crearBotonEstilizado("➕ Agregar al Carrito", COLOR_EXITO, Color.WHITE);
 
         lblEstadoProducto = new JLabel(" ");
         lblEstadoProducto.setFont(FUENTE_TEXTO);
@@ -336,13 +350,14 @@ public class MainFrame extends JFrame {
     }
 
     // =========================================================================
-    // PANEL CENTRAL DIVIDIDO: TABLA DE VENTAS Y CONSOLA
+    // PANEL CENTRAL DIVIDIDO: TABLA DE VENTAS Y CONSOLA DE REGISTROS
     // =========================================================================
     private JSplitPane crearPanelCentral() {
         JSplitPane splitCentro = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         splitCentro.setResizeWeight(0.70);
         splitCentro.setDividerSize(7);
 
+        // --- TABLA DE CARRITO DE VENTAS ---
         String[] columnas = {"Código", "Descripción del Producto", "Cant.", "Precio Unitario", "Subtotal", "Costo Mayorista"};
         modeloTabla = new DefaultTableModel(columnas, 0) {
             @Override
@@ -361,21 +376,19 @@ public class MainFrame extends JFrame {
         tablaVentas.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         tablaVentas.setGridColor(new Color(230, 230, 230));
 
+        // Aplicar renderizador personalizado
         TablaVentasCellRenderer renderer = new TablaVentasCellRenderer();
         for (int i = 0; i < tablaVentas.getColumnCount(); i++) {
             tablaVentas.getColumnModel().getColumn(i).setCellRenderer(renderer);
         }
 
-        tablaVentas.getColumnModel().getColumn(0).setPreferredWidth(90);  
-        tablaVentas.getColumnModel().getColumn(1).setPreferredWidth(350); 
-        tablaVentas.getColumnModel().getColumn(2).setPreferredWidth(70);  
-        tablaVentas.getColumnModel().getColumn(3).setPreferredWidth(110); 
-        tablaVentas.getColumnModel().getColumn(4).setPreferredWidth(110); 
-        
-        TableColumn colCostoMayorista = tablaVentas.getColumnModel().getColumn(5);
-        colCostoMayorista.setMinWidth(0);
-        colCostoMayorista.setMaxWidth(0);
-        colCostoMayorista.setPreferredWidth(0);
+        // Ajuste de anchos de columnas
+        tablaVentas.getColumnModel().getColumn(0).setPreferredWidth(100);
+        tablaVentas.getColumnModel().getColumn(1).setPreferredWidth(380);
+        tablaVentas.getColumnModel().getColumn(2).setPreferredWidth(60);
+        tablaVentas.getColumnModel().getColumn(3).setPreferredWidth(120);
+        tablaVentas.getColumnModel().getColumn(4).setPreferredWidth(130);
+        tablaVentas.getColumnModel().getColumn(5).setPreferredWidth(130);
 
         scrollTabla = new JScrollPane(tablaVentas);
         scrollTabla.setBackground(COLOR_PANEL);
@@ -385,6 +398,7 @@ public class MainFrame extends JFrame {
                 TitledBorder.LEFT, TitledBorder.TOP, FUENTE_SUBTITULO, COLOR_OSCURO
         ));
 
+        // --- CONSOLA DE OPERACIONES EN VIVO ---
         txtConsolaVentas = new JTextArea();
         txtConsolaVentas.setEditable(false);
         txtConsolaVentas.setFont(FUENTE_CONSOLA);
@@ -407,7 +421,7 @@ public class MainFrame extends JFrame {
     }
 
     // =========================================================================
-    // PANEL INFERIOR DE TOTALES Y ACCIONES
+    // PANEL INFERIOR DE TOTALES Y BOTONES DE COBRO
     // =========================================================================
     private JPanel crearPanelInferior() {
         JPanel panelInferior = new JPanel(new BorderLayout(10, 10));
@@ -417,6 +431,7 @@ public class MainFrame extends JFrame {
                 BorderFactory.createEmptyBorder(10, 15, 10, 15)
         ));
 
+        // Información de Totales en Pantalla
         JPanel panelTotalInfo = new JPanel(new GridLayout(3, 1, 2, 2));
         panelTotalInfo.setOpaque(false);
 
@@ -428,7 +443,7 @@ public class MainFrame extends JFrame {
         lblTextoTotal.setFont(FUENTE_SUBTITULO);
         lblTextoTotal.setForeground(COLOR_OSCURO);
 
-        lblTotal = new JLabel("TOTAL: $0.00");
+        lblTotal = new JLabel("$ 0,00");
         lblTotal.setFont(FUENTE_TOTAL);
         lblTotal.setForeground(COLOR_PELIGRO);
 
@@ -436,13 +451,14 @@ public class MainFrame extends JFrame {
         panelTotalInfo.add(lblTextoTotal);
         panelTotalInfo.add(lblTotal);
 
+        // Panel de Botones de Acción
         JPanel panelBotonesAccion = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 8));
         panelBotonesAccion.setOpaque(false);
 
-        btnEliminarItem = crearBotonEstilizado("Eliminar Item (Supr)", ICONO_X, COLOR_ADVERTENCIA, Color.BLACK);
-        btnCancelarVenta = crearBotonEstilizado("Cancelar Venta (Esc)", ICONO_X, COLOR_PELIGRO, Color.WHITE);
-        btnExportarTxt = crearBotonEstilizado(" Exportar Venta Día", ICONO_EXPORTAR, COLOR_PRIMARIO, Color.WHITE);
-        btnCobrar = crearBotonEstilizado("COBRAR VENTA (F5)", ICONO_COBRAR, COLOR_EXITO, Color.WHITE);
+        btnEliminarItem = crearBotonEstilizado("🗑️ Eliminar Item (Supr)", COLOR_ADVERTENCIA, Color.BLACK);
+        btnCancelarVenta = crearBotonEstilizado("❌ Cancelar Venta (Esc)", COLOR_PELIGRO, Color.WHITE);
+        btnExportarTxt = crearBotonEstilizado("📄 Exportar Venta Día", COLOR_PRIMARIO, Color.WHITE);
+        btnCobrar = crearBotonEstilizado("💵 COBRAR VENTA (F5)", COLOR_EXITO, Color.WHITE);
         btnCobrar.setFont(new Font("Segoe UI", Font.BOLD, 15));
         btnCobrar.setPreferredSize(new Dimension(220, 46));
 
@@ -458,7 +474,7 @@ public class MainFrame extends JFrame {
     }
 
     // =========================================================================
-    // BARRA DE ESTADO
+    // BARRA DE ESTADO Y MONITOR DEL SISTEMA
     // =========================================================================
     private JPanel crearBarraEstado() {
         JPanel panelEstado = new JPanel(new BorderLayout(10, 0));
@@ -480,20 +496,8 @@ public class MainFrame extends JFrame {
     }
 
     // =========================================================================
-    // HELPER PARA CREACIÓN DE BOTONES CON ESTILO
+    // HELPER PARA CREACIÓN DE BOTONES CON ESTILO Y MOUSE HOVER
     // =========================================================================
-    private JButton crearBotonEstilizado(String texto, String nombreIcono, Color fondo, Color textoColor) {
-        JButton btn = crearBotonEstilizado(texto, fondo, textoColor);
-        if (nombreIcono != null && !nombreIcono.isBlank()) {
-            ImageIcon icono = cargarIcono(RUTA_ICONOS + nombreIcono, 18, 18);
-            if (icono != null) {
-                btn.setIcon(icono);
-                btn.setIconTextGap(6);
-            }
-        }
-        return btn;
-    }
-
     private JButton crearBotonEstilizado(String texto, Color fondo, Color textoColor) {
         JButton btn = new JButton(texto);
         btn.setFont(FUENTE_BOTON);
@@ -527,6 +531,7 @@ public class MainFrame extends JFrame {
     private void configurarAtajosTeclado() {
         JRootPane root = getRootPane();
 
+        // F5 - Cobrar Venta
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), "ACCION_COBRAR");
         root.getActionMap().put("ACCION_COBRAR", new AbstractAction() {
             @Override
@@ -535,6 +540,7 @@ public class MainFrame extends JFrame {
             }
         });
 
+        // ESC - Cancelar Venta
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "ACCION_CANCELAR");
         root.getActionMap().put("ACCION_CANCELAR", new AbstractAction() {
             @Override
@@ -543,6 +549,7 @@ public class MainFrame extends JFrame {
             }
         });
 
+        // SUPR / DELETE - Eliminar Item Seleccionado
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), "ACCION_ELIMINAR");
         root.getActionMap().put("ACCION_ELIMINAR", new AbstractAction() {
             @Override
@@ -551,6 +558,7 @@ public class MainFrame extends JFrame {
             }
         });
 
+        // F12 - Centro de Reportes
         root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_F12, 0), "ACCION_REPORTES");
         root.getActionMap().put("ACCION_REPORTES", new AbstractAction() {
             @Override
@@ -561,7 +569,7 @@ public class MainFrame extends JFrame {
     }
 
     // =========================================================================
-    // RELOJ EN TIEMPO REAL
+    // SERVICIO DE RELOJ EN TIEMPO REAL
     // =========================================================================
     private void iniciarRelojSistema() {
         timerReloj = new javax.swing.Timer(1000, e -> {
@@ -573,12 +581,15 @@ public class MainFrame extends JFrame {
     }
 
     // =========================================================================
-    // UTILIDADES DE ICONOS Y LOGS
+    // UTILIDADES GENERALES
     // =========================================================================
     public ImageIcon cargarIcono(String ruta, int ancho, int alto) {
-        if (ruta == null || ruta.isBlank()) return null;
+        if (ruta == null || ruta.isBlank()) {
+            return null;
+        }
 
         try {
+            // 1) Buscar primero como archivo relativo al proyecto.
             File file = new File(ruta);
             Image img = null;
 
@@ -586,12 +597,17 @@ public class MainFrame extends JFrame {
                 img = new ImageIcon(file.getAbsolutePath()).getImage();
             }
 
+            // 2) Si no existe como archivo, buscarlo como recurso del classpath.
             if (img == null) {
                 String recurso = ruta.replace("\\", "/");
-                if (!recurso.startsWith("/")) recurso = "/" + recurso;
+                if (!recurso.startsWith("/")) {
+                    recurso = "/" + recurso;
+                }
 
                 java.net.URL url = MainFrame.class.getResource(recurso);
-                if (url != null) img = new ImageIcon(url).getImage();
+                if (url != null) {
+                    img = new ImageIcon(url).getImage();
+                }
             }
 
             if (img != null) {
@@ -605,11 +621,19 @@ public class MainFrame extends JFrame {
         return null;
     }
 
+    /**
+     * Busca un icono dentro de imagenes/ICONOS/ utilizando palabras clave.
+     * Se elige el archivo más recientemente modificado entre las coincidencias.
+     */
     private String buscarRutaIconoPorPalabras(String... palabrasClave) {
-        if (palabrasClave == null || palabrasClave.length == 0) return null;
+        if (palabrasClave == null || palabrasClave.length == 0) {
+            return null;
+        }
 
         File carpeta = new File(RUTA_ICONOS);
-        if (!carpeta.exists() || !carpeta.isDirectory()) return null;
+        if (!carpeta.exists() || !carpeta.isDirectory()) {
+            return null;
+        }
 
         File[] archivos = carpeta.listFiles((dir, nombre) -> {
             String nombreMinusculas = nombre.toLowerCase(Locale.ROOT);
@@ -620,7 +644,9 @@ public class MainFrame extends JFrame {
                     || nombreMinusculas.endsWith(".webp");
         });
 
-        if (archivos == null || archivos.length == 0) return null;
+        if (archivos == null || archivos.length == 0) {
+            return null;
+        }
 
         File mejorCoincidencia = null;
         int mejorPuntuacion = -1;
@@ -631,15 +657,23 @@ public class MainFrame extends JFrame {
             int puntuacion = 0;
 
             for (String palabra : palabrasClave) {
-                if (palabra == null || palabra.isBlank()) continue;
+                if (palabra == null || palabra.isBlank()) {
+                    continue;
+                }
+
                 String clave = palabra.toLowerCase(Locale.ROOT).trim();
-                if (nombre.contains(clave)) puntuacion += 10;
+                if (nombre.contains(clave)) {
+                    puntuacion += 10;
+                }
             }
 
-            if (puntuacion <= 0) continue;
+            if (puntuacion <= 0) {
+                continue;
+            }
 
             long fechaModificacion = archivo.lastModified();
-            if (puntuacion > mejorPuntuacion || (puntuacion == mejorPuntuacion && fechaModificacion > mejorFecha)) {
+            if (puntuacion > mejorPuntuacion
+                    || (puntuacion == mejorPuntuacion && fechaModificacion > mejorFecha)) {
                 mejorCoincidencia = archivo;
                 mejorPuntuacion = puntuacion;
                 mejorFecha = fechaModificacion;
@@ -658,27 +692,33 @@ public class MainFrame extends JFrame {
 
     public void actualizarResumenCarrito(int totalItems, double granTotal) {
         lblSubtotalTexto.setText("Items en carrito: " + totalItems);
-        lblTotal.setText(String.format("TOTAL: $%.2f", granTotal));
+        lblTotal.setText(String.format("$ %,.2f", granTotal));
     }
 
     private void mostrarAcercaDe() {
         String mensaje =
                 "Papelería Siglo XXI - POS & Inventory System\n" +
-                "Versión 1.0.0 Tienda de Barrio Edition\n" +
+                "Versión 3.5.0 Enterprise Edition\n" +
                 "Desarrollado para Control Operativo y Facturación Diaria\n\n" +
                 "© 2026 Todos los derechos reservados.";
 
-        ImageIcon icono = cargarIcono(RUTA_ICONOS + ICONO_INTERROGACION, 56, 56);
-        if (icono == null) {
-            String rutaIcono = buscarRutaIconoPorPalabras("acerca", "about", "informacion", "info", "siglo", "ICONO-INTERROGACION");
-            if (rutaIcono != null) icono = cargarIcono(rutaIcono, 56, 56);
-        }
+        String rutaIcono = buscarRutaIconoPorPalabras(
+                "acerca", "about", "informacion", "info", "siglo");
 
-        JOptionPane.showMessageDialog(this, mensaje, "Acerca de Papelería Siglo XXI", JOptionPane.INFORMATION_MESSAGE, icono);
+        ImageIcon icono = rutaIcono != null
+                ? cargarIcono(rutaIcono, 56, 56)
+                : null;
+
+        JOptionPane.showMessageDialog(
+                this,
+                mensaje,
+                "Acerca de Papelería Siglo XXI",
+                JOptionPane.INFORMATION_MESSAGE,
+                icono);
     }
 
     // =========================================================================
-    // GETTERS DE COMPONENTES VISUALES
+    // GETTERS DE COMPONENTES VISUALES PARA EL CONTROLADOR
     // =========================================================================
     public JTextField getTxtBusqueda() { return txtBusqueda; }
     public JTextField getTxtCantidad() { return txtCantidad; }
@@ -696,11 +736,23 @@ public class MainFrame extends JFrame {
     public JLabel getLblTotal() { return lblTotal; }
     public JTextArea getTxtConsolaVentas() { return txtConsolaVentas; }
     public JLabel getLblEstadoProducto() { return lblEstadoProducto; }
-    public String getNombreEmpleadoActivo() { return nombreEmpleadoActivo; }
-    public boolean isModoPruebas() { return modoPruebas; }
+
+
+    // =========================================================================
+    // DATOS DE SESIÓN / ESTADO DEL SISTEMA
+    // =========================================================================
+    public String getNombreEmpleadoActivo() {
+        return nombreEmpleadoActivo;
+    }
+
+    public boolean isModoPruebas() {
+        return modoPruebas;
+    }
 
     public void setEstadoSistema(String mensaje) {
-        if (lblEstadoSistema != null) lblEstadoSistema.setText(mensaje);
+        if (lblEstadoSistema != null) {
+            lblEstadoSistema.setText(mensaje);
+        }
     }
 
     // =========================================================================
@@ -719,26 +771,24 @@ public class MainFrame extends JFrame {
                 c.setForeground(Color.WHITE);
             }
 
+            // Alineaciones por columna
             if (column == 0 || column == 2) {
                 setHorizontalAlignment(SwingConstants.CENTER);
             } else if (column >= 3) {
-                setHorizontalAlignment(SwingConstants.RIGHT); 
+                setHorizontalAlignment(SwingConstants.RIGHT);
             } else {
-                setHorizontalAlignment(SwingConstants.LEFT);  
+                setHorizontalAlignment(SwingConstants.LEFT);
             }
 
             return c;
         }
     }
 
-    // =========================================================================
-    // DIÁLOGOS Y VENTANAS EMERGENTES (INCLUIDAS PARA COMPATIBILIDAD CON CONTROLADOR)
-    // =========================================================================
 
     // =========================================================================
-    // DIÁLOGO DE SELECCIÓN RÁPIDA DE EFECTIVO (BILLETES Y MONEDAS)
+    // DIÁLOGO 1B: COBRO EN EFECTIVO COMPLETO (COMPATIBLE CON EL CÓDIGO ORIGINAL)
     // =========================================================================
-    public class DialogoEfectivoBotones extends JDialog {
+    public class DialogoEfectivoBotonesCompleto extends JDialog {
         private boolean confirmado = false;
         private double dineroRecibido = 0.0;
         private double devuelta = 0.0;
@@ -746,18 +796,12 @@ public class MainFrame extends JFrame {
         private final int[] valores = {100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50};
         private final String[] etiquetas = {"$100.000", "$50.000", "$20.000", "$10.000", "$5.000", "$2.000", "$1.000", "$500", "$200", "$100", "$50"};
         private final String[] rutasImagenes = {
-            MainFrame.RUTA_DINERO + "billete-100000.jpg", 
-            MainFrame.RUTA_DINERO + "billete-50000.jpg", 
-            MainFrame.RUTA_DINERO + "billete-20000.jpg", 
-            MainFrame.RUTA_DINERO + "billete-10000.jpg", 
-            MainFrame.RUTA_DINERO + "billete-5000.jpg", 
-            MainFrame.RUTA_DINERO + "billete-2000.jpg", 
-            MainFrame.RUTA_DINERO + "moneda-1000.jpg", 
-            MainFrame.RUTA_DINERO + "moneda-500.jpg", 
-            MainFrame.RUTA_DINERO + "moneda-200.jpg", 
-            MainFrame.RUTA_DINERO + "moneda-100.jpg", 
-            MainFrame.RUTA_DINERO + "moneda-50.jpg"
-        };
+            RUTA_DINERO + "billete-100000.jpg", RUTA_DINERO + "billete-50000.jpg",
+            RUTA_DINERO + "billete-20000.jpg", RUTA_DINERO + "billete-10000.jpg",
+            RUTA_DINERO + "billete-5000.jpg", RUTA_DINERO + "billete-2000.jpg",
+            RUTA_DINERO + "moneda-1000.jpg", RUTA_DINERO + "moneda-500.jpg",
+            RUTA_DINERO + "moneda-200.jpg", RUTA_DINERO + "moneda-100.jpg",
+            RUTA_DINERO + "moneda-50.jpg"};
         private final int[] cantidades = new int[11];
         private final JLabel[] lblContadores = new JLabel[11];
         private final JLabel lblTotalRecibidoVal;
@@ -765,17 +809,18 @@ public class MainFrame extends JFrame {
         private final JLabel lblDesgloseVal;
         private final double totalPagar;
 
-        public DialogoEfectivoBotones(Frame parent, double totalPagar) {
+        public DialogoEfectivoBotonesCompleto(Frame parent, double totalPagar) {
             super(parent, "Selección Rápida de Efectivo (COP)", true);
             this.totalPagar = totalPagar;
-            setSize(750, 780); 
+            setSize(750, 780);
             setLocationRelativeTo(parent);
             setLayout(new BorderLayout(10, 10));
+            setResizable(false);
 
             JPanel panelNorte = new JPanel(new FlowLayout(FlowLayout.CENTER));
-            JLabel lblTotal = new JLabel(String.format("TOTAL A PAGAR: $%.2f", totalPagar));
+            JLabel lblTotal = new JLabel(String.format("TOTAL A PAGAR: $%,.2f", totalPagar));
             lblTotal.setFont(new Font("Segoe UI", Font.BOLD, 20));
-            lblTotal.setForeground(new Color(40, 116, 166));
+            lblTotal.setForeground(COLOR_PRIMARIO_DARK);
             panelNorte.add(lblTotal);
             add(panelNorte, BorderLayout.NORTH);
 
@@ -788,22 +833,16 @@ public class MainFrame extends JFrame {
                 panelBotonItem.setBorder(BorderFactory.createLineBorder(new Color(200, 200, 200), 1));
                 JButton btnDenom = new JButton(etiquetas[i]);
                 btnDenom.setFont(new Font("Segoe UI", Font.BOLD, 13));
-                if (valores[i] >= 2000) btnDenom.setBackground(new Color(220, 237, 245));
-                else btnDenom.setBackground(new Color(245, 240, 220));
-                
+                btnDenom.setBackground(valores[i] >= 2000 ? new Color(220, 237, 245) : new Color(245, 240, 220));
                 ImageIcon iconoDinero = cargarIcono(rutasImagenes[i], 90, 45);
                 if (iconoDinero != null) {
                     btnDenom.setIcon(iconoDinero);
                     btnDenom.setVerticalTextPosition(SwingConstants.BOTTOM);
                     btnDenom.setHorizontalTextPosition(SwingConstants.CENTER);
                 }
-                
                 lblContadores[i] = new JLabel("Cant: 0", SwingConstants.CENTER);
                 lblContadores[i].setFont(new Font("Segoe UI", Font.PLAIN, 12));
-                btnDenom.addActionListener(e -> {
-                    cantidades[index]++;
-                    actualizarCalculos();
-                });
+                btnDenom.addActionListener(e -> { cantidades[index]++; actualizarCalculos(); });
                 panelBotonItem.add(btnDenom, BorderLayout.CENTER);
                 panelBotonItem.add(lblContadores[i], BorderLayout.SOUTH);
                 panelGridBotones.add(panelBotonItem);
@@ -811,12 +850,9 @@ public class MainFrame extends JFrame {
 
             JButton btnLimpiar = new JButton("🔄 Limpiar Todo");
             btnLimpiar.setFont(new Font("Segoe UI", Font.BOLD, 12));
-            btnLimpiar.setBackground(new Color(220, 53, 69));
+            btnLimpiar.setBackground(COLOR_PELIGRO);
             btnLimpiar.setForeground(Color.WHITE);
-            btnLimpiar.addActionListener(e -> {
-                for (int i = 0; i < cantidades.length; i++) cantidades[i] = 0;
-                actualizarCalculos();
-            });
+            btnLimpiar.addActionListener(e -> { java.util.Arrays.fill(cantidades, 0); actualizarCalculos(); });
             panelGridBotones.add(btnLimpiar);
             add(panelGridBotones, BorderLayout.CENTER);
 
@@ -829,7 +865,7 @@ public class MainFrame extends JFrame {
             lblTotalRecibidoVal.setFont(new Font("Segoe UI", Font.BOLD, 15));
             lblDevueltaVal = new JLabel("Cambio (Devuelta): $0.00");
             lblDevueltaVal.setFont(new Font("Segoe UI", Font.BOLD, 15));
-            lblDevueltaVal.setForeground(new Color(0, 128, 0));
+            lblDevueltaVal.setForeground(COLOR_EXITO);
             lblDesgloseVal = new JLabel("Desglose devuelta: -");
             lblDesgloseVal.setFont(new Font("Segoe UI", Font.PLAIN, 12));
             panelResultados.add(lblTotalRecibidoVal);
@@ -838,15 +874,8 @@ public class MainFrame extends JFrame {
             panelSur.add(panelResultados);
 
             JPanel panelBotonesAccion = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            JButton btnConfirmar = new JButton("Confirmar Pago");
-            btnConfirmar.setFont(new Font("Segoe UI", Font.BOLD, 14));
-            btnConfirmar.setBackground(new Color(40, 167, 69));
-            btnConfirmar.setForeground(Color.WHITE);
-            JButton btnCancelar = new JButton("Cancelar");
-            btnCancelar.setFont(new Font("Segoe UI", Font.BOLD, 14));
-            btnCancelar.setBackground(new Color(108, 117, 125));
-            btnCancelar.setForeground(Color.WHITE);
-
+            JButton btnConfirmar = crearBotonEstilizado("✔️ Confirmar Pago", COLOR_EXITO, Color.WHITE);
+            JButton btnCancelar = crearBotonEstilizado("Cancelar", COLOR_PELIGRO, Color.WHITE);
             btnConfirmar.addActionListener(e -> {
                 if (dineroRecibido < totalPagar) {
                     JOptionPane.showMessageDialog(this, "El dinero recibido es menor al total a pagar.", "Monto Insuficiente", JOptionPane.ERROR_MESSAGE);
@@ -855,10 +884,7 @@ public class MainFrame extends JFrame {
                 confirmado = true;
                 dispose();
             });
-            btnCancelar.addActionListener(e -> {
-                confirmado = false;
-                dispose();
-            });
+            btnCancelar.addActionListener(e -> { confirmado = false; dispose(); });
             panelBotonesAccion.add(btnCancelar);
             panelBotonesAccion.add(btnConfirmar);
             panelSur.add(panelBotonesAccion);
@@ -870,13 +896,12 @@ public class MainFrame extends JFrame {
             double recibido = 0.0;
             for (int i = 0; i < valores.length; i++) {
                 recibido += (double) cantidades[i] * valores[i];
-                lblContadores[i].setText("Cant: " + cantidades[i]);
+                if (lblContadores[i] != null) lblContadores[i].setText("Cant: " + cantidades[i]);
             }
             dineroRecibido = recibido;
-            devuelta = dineroRecibido - totalPagar;
-            if (devuelta < 0) devuelta = 0.0;
-            lblTotalRecibidoVal.setText(String.format("Total Recibido: $%.2f", dineroRecibido));
-            lblDevueltaVal.setText(String.format("Cambio (Devuelta): $%.2f", devuelta));
+            devuelta = Math.max(0.0, dineroRecibido - totalPagar);
+            lblTotalRecibidoVal.setText(String.format("Total Recibido: $%,.2f", dineroRecibido));
+            lblDevueltaVal.setText(String.format("Cambio (Devuelta): $%,.2f", devuelta));
             if (dineroRecibido >= totalPagar) {
                 double cambioRestante = devuelta;
                 StringBuilder desglose = new StringBuilder("Desglose devuelta: ");
@@ -884,7 +909,7 @@ public class MainFrame extends JFrame {
                 for (int i = 0; i < valores.length; i++) {
                     int cantidadDenominacion = (int) (cambioRestante / valores[i]);
                     if (cantidadDenominacion > 0) {
-                        desglose.append(cantidadDenominacion).append("x($").append(etiquetas[i]).append(") ");
+                        desglose.append(cantidadDenominacion).append("x(").append(etiquetas[i]).append(") ");
                         cambioRestante %= valores[i];
                         hayCambio = true;
                     }
@@ -893,7 +918,8 @@ public class MainFrame extends JFrame {
                 desgloseDevueltaTexto = desglose.toString();
                 lblDesgloseVal.setText(desgloseDevueltaTexto);
             } else {
-                lblDesgloseVal.setText("Desglose devuelta: Monto insuficiente");
+                desgloseDevueltaTexto = "Desglose devuelta: Monto insuficiente";
+                lblDesgloseVal.setText(desgloseDevueltaTexto);
             }
         }
 
@@ -903,6 +929,129 @@ public class MainFrame extends JFrame {
         public String getDesgloseDevueltaTexto() { return desgloseDevueltaTexto; }
     }
 
+    // =========================================================================
+    // DIÁLOGO 1: COBRO EN EFECTIVO Y CALCULADORA DE DENOMINACIONES
+    // =========================================================================
+    public class DialogoEfectivoBotones extends JDialog {
+        private boolean confirmado = false;
+        private double dineroRecibido = 0.0;
+        private double devuelta = 0.0;
+        private final double totalPagar;
+        private String desgloseDevueltaTexto = "";
+
+        public DialogoEfectivoBotones(Frame padre, double totalPagar) {
+            super(padre, "Cobro de Venta en Efectivo", true);
+            this.totalPagar = totalPagar;
+
+            setSize(450, 380);
+            setLocationRelativeTo(padre);
+            setLayout(new BorderLayout(10, 10));
+            setResizable(false);
+
+            JPanel panelPrincipal = new JPanel(new BorderLayout(10, 10));
+            panelPrincipal.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+            panelPrincipal.setBackground(COLOR_FONDO);
+
+            // Resumen de Cobro
+            JPanel panelInfo = new JPanel(new GridLayout(3, 1, 6, 6));
+            panelInfo.setOpaque(false);
+
+            JLabel lblMontoTotal = new JLabel(String.format("Total a Pagar: $ %,.2f", totalPagar));
+            lblMontoTotal.setFont(new Font("Segoe UI", Font.BOLD, 18));
+            lblMontoTotal.setForeground(COLOR_OSCURO);
+
+            JTextField txtIngreso = new JTextField();
+            txtIngreso.setFont(new Font("Segoe UI", Font.BOLD, 22));
+            txtIngreso.setHorizontalAlignment(JTextField.RIGHT);
+
+            JLabel lblDevueltaCalculada = new JLabel("Cambio / Devuelta: $ 0,00");
+            lblDevueltaCalculada.setFont(new Font("Segoe UI", Font.BOLD, 15));
+            lblDevueltaCalculada.setForeground(COLOR_EXITO);
+
+            txtIngreso.getDocument().addDocumentListener(new DocumentListener() {
+                public void insertUpdate(DocumentEvent e) { calcular(); }
+                public void removeUpdate(DocumentEvent e) { calcular(); }
+                public void changedUpdate(DocumentEvent e) { calcular(); }
+
+                private void calcular() {
+                    try {
+                        String texto = txtIngreso.getText().replace(".", "").replace(",", ".");
+                        double rec = Double.parseDouble(texto);
+                        double dev = rec - totalPagar;
+                        if (dev >= 0) {
+                            lblDevueltaCalculada.setText(String.format("Cambio / Devuelta: $ %,.2f", dev));
+                            lblDevueltaCalculada.setForeground(COLOR_EXITO);
+                        } else {
+                            lblDevueltaCalculada.setText(String.format("Faltante: $ %,.2f", Math.abs(dev)));
+                            lblDevueltaCalculada.setForeground(COLOR_PELIGRO);
+                        }
+                    } catch (NumberFormatException ex) {
+                        lblDevueltaCalculada.setText("Cambio / Devuelta: $ 0,00");
+                    }
+                }
+            });
+
+            panelInfo.add(lblMontoTotal);
+            panelInfo.add(txtIngreso);
+            panelInfo.add(lblDevueltaCalculada);
+
+            panelPrincipal.add(panelInfo, BorderLayout.NORTH);
+
+            // Billetes de acceso rápido (Pesos Colombianos)
+            JPanel panelBilletes = new JPanel(new GridLayout(2, 3, 8, 8));
+            panelBilletes.setOpaque(false);
+
+            double[] denominaciones = {2000, 5000, 10000, 20000, 50000, 100000};
+            for (double den : denominaciones) {
+                JButton btn = new JButton(String.format("$ %,.0f", den));
+                btn.setFont(FUENTE_BOTON);
+                btn.setBackground(COLOR_PANEL);
+                btn.addActionListener(e -> txtIngreso.setText(String.format("%.0f", den)));
+                panelBilletes.add(btn);
+            }
+
+            panelPrincipal.add(panelBilletes, BorderLayout.CENTER);
+
+            // Botones de acción
+            JPanel panelBotonera = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+            panelBotonera.setOpaque(false);
+
+            JButton btnConfirmar = crearBotonEstilizado("✔️ Confirmar y Cobrar", COLOR_EXITO, Color.WHITE);
+            btnConfirmar.setFont(FUENTE_SUBTITULO);
+
+            btnConfirmar.addActionListener(e -> {
+                try {
+                    String texto = txtIngreso.getText().replace(".", "").replace(",", ".");
+                    dineroRecibido = Double.parseDouble(texto);
+                    if (dineroRecibido < totalPagar) {
+                        JOptionPane.showMessageDialog(this, "El dinero entregado por el cliente es insuficiente.", "Efectivo Faltante", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    devuelta = dineroRecibido - totalPagar;
+                    desgloseDevueltaTexto = String.format("Recibido: $%,.2f | Cambio: $%,.2f", dineroRecibido, devuelta);
+                    confirmado = true;
+                    dispose();
+                } catch (NumberFormatException ex) {
+                    JOptionPane.showMessageDialog(this, "Ingrese un monto numérico válido.", "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            });
+
+            panelBotonera.add(btnConfirmar);
+            panelPrincipal.add(panelBotonera, BorderLayout.SOUTH);
+
+            add(panelPrincipal);
+        }
+
+        public boolean isConfirmado() { return confirmado; }
+        public double getDineroRecibido() { return dineroRecibido; }
+        public double getDevuelta() { return devuelta; }
+        public String getDesgloseDevueltaTexto() { return desgloseDevueltaTexto; }
+    }
+
+
+    // =========================================================================
+    // DIÁLOGO 2: PAGO MIXTO (EFECTIVO + TRANSFERENCIA)
+    // =========================================================================
     public class DialogoPagoMixto extends JDialog {
         private boolean confirmado = false;
         private double montoEfectivo = 0.0;
@@ -981,6 +1130,10 @@ public class MainFrame extends JFrame {
         public double getDevuelta() { return devuelta; }
     }
 
+
+    // =========================================================================
+    // DIÁLOGO 3: PAGO Y LIQUIDACIÓN A EMPLEADOS
+    // =========================================================================
     public class DialogoPagoEmpleados extends JDialog {
         private final JComboBox<String> comboEmpleado;
         private final JComboBox<String> comboConcepto;
@@ -993,12 +1146,13 @@ public class MainFrame extends JFrame {
         private final JLabel lblTotalPagadoHoy;
         private final JButton btnRegistrarPago;
 
+        // Rango utilizado para calcular ventas/comisiones de empleados.
         private LocalDate inicioRango;
         private LocalDate finRango;
 
         public DialogoPagoEmpleados(Frame padre, String[] empleados, String empleadoActual) {
             super(padre, "Centro de Pagos y Liquidación a Empleados", true);
-            setSize(520, 520);
+            setSize(500, 470);
             setLocationRelativeTo(padre);
             setLayout(new BorderLayout(10, 10));
             setResizable(false);
@@ -1065,7 +1219,7 @@ public class MainFrame extends JFrame {
             lblTotalPagadoHoy.setForeground(COLOR_PELIGRO);
             panelForm.add(lblTotalPagadoHoy);
 
-            btnRegistrarPago = crearBotonEstilizado(" Registrar y Guardar Pago", ICONO_GUARDAR, COLOR_EXITO, Color.WHITE);
+            btnRegistrarPago = crearBotonEstilizado("💾 Registrar y Guardar Pago", COLOR_EXITO, Color.WHITE);
             btnRegistrarPago.setFont(FUENTE_SUBTITULO);
 
             add(panelForm, BorderLayout.CENTER);
@@ -1076,6 +1230,9 @@ public class MainFrame extends JFrame {
             add(panelFooter, BorderLayout.SOUTH);
         }
 
+        // ================================================================
+        // CONTROL DEL PERÍODO DE EVALUACIÓN
+        // ================================================================
         public void setTextoFechaEvaluacion(String texto) {
             if (lblTextoFechaEvaluacion != null) {
                 lblTextoFechaEvaluacion.setText(texto);
@@ -1085,6 +1242,7 @@ public class MainFrame extends JFrame {
         public void setRangoEvaluacion(LocalDate inicio, LocalDate fin) {
             this.inicioRango = inicio;
             this.finRango = fin;
+
             if (inicio != null && fin != null) {
                 if (inicio.equals(fin)) {
                     setTextoFechaEvaluacion(inicio.toString());
@@ -1114,7 +1272,6 @@ public class MainFrame extends JFrame {
         public JComboBox<String> getComboConcepto() { return comboConcepto; }
         public JSpinner getSpinnerFecha() { return spinnerFecha; }
         public JButton getBtnAbrirSelectorFecha() { return btnAbrirSelectorFecha; }
-        public JLabel getLblTextoFechaEvaluacion() { return lblTextoFechaEvaluacion; }
         public JLabel getLblVentasTotales() { return lblVentasTotales; }
         public JTextField getTxtPorcentajeComision() { return txtPorcentajeComision; }
         public JTextField getTxtMontoPagar() { return txtMontoPagar; }
@@ -1128,12 +1285,18 @@ public class MainFrame extends JFrame {
         public void setFechaSeleccionada(Date fecha) {
             spinnerFecha.setValue(fecha);
             if (fecha != null) {
-                LocalDate ld = fecha.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+                LocalDate ld = fecha.toInstant()
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDate();
                 setRangoEvaluacion(ld, ld);
             }
         }
     }
 
+
+    // =========================================================================
+    // DIÁLOGO 4: CENTRO DE REPORTES Y ESTADÍSTICAS VISUALES
+    // =========================================================================
     public class DialogoCentroReportes extends JDialog {
         private final JLabel lblTotalBrutoHoy;
         private final JLabel lblTotalGananciaHoy;
@@ -1150,6 +1313,7 @@ public class MainFrame extends JFrame {
             JTabbedPane tabbedPane = new JTabbedPane();
             tabbedPane.setFont(FUENTE_SUBTITULO);
 
+            // Tab 1: KPIs y Resumen
             JPanel panelResumen = new JPanel(new BorderLayout(10, 10));
             panelResumen.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
             panelResumen.setBackground(COLOR_FONDO);
@@ -1167,6 +1331,7 @@ public class MainFrame extends JFrame {
 
             panelResumen.add(panelKpis, BorderLayout.NORTH);
 
+            // Tabla de Desglose
             String[] col = {"Hora Venta", "Método Pago", "Items", "Monto Total", "Atendido Por"};
             modeloConsolidado = new DefaultTableModel(col, 0);
             tablaConsolidado = new JTable(modeloConsolidado);
@@ -1176,6 +1341,7 @@ public class MainFrame extends JFrame {
             scrollConsolidado.setBorder(BorderFactory.createTitledBorder(" Detalle de Transacciones del Día "));
             panelResumen.add(scrollConsolidado, BorderLayout.CENTER);
 
+            // Tab 2: Panel de Renderizado Gráfico Swing Custom
             JPanel panelGrafico = new JPanel() {
                 @Override
                 protected void paintComponent(Graphics g) {
@@ -1187,11 +1353,13 @@ public class MainFrame extends JFrame {
                     g2.setColor(COLOR_OSCURO);
                     g2.drawString("Comportamiento Estímulo de Ventas por Tramo Horario", 30, 35);
 
+                    // Ejes cartesiano
                     int origenX = 60;
                     int origenY = 280;
                     g2.drawLine(origenX, origenY, 680, origenY);
                     g2.drawLine(origenX, 60, origenX, origenY);
 
+                    // Barras gráficas
                     int[] valores = {45, 90, 150, 80, 220, 260, 190, 110};
                     String[] horas = {"8am", "10am", "12pm", "2pm", "4pm", "6pm", "8pm", "10pm"};
 
@@ -1245,6 +1413,10 @@ public class MainFrame extends JFrame {
         public DefaultTableModel getModeloConsolidado() { return modeloConsolidado; }
     }
 
+
+    // =========================================================================
+    // DIÁLOGO 5: BUSCADOR DE ACTUALIZACIONES
+    // =========================================================================
     public class DialogoBuscarActualizaciones extends JDialog {
         public DialogoBuscarActualizaciones(Frame padre) {
             super(padre, "Verificación del Sistema", true);
@@ -1281,23 +1453,43 @@ public class MainFrame extends JFrame {
         }
     }
 
+
+    // =========================================================================
+    // DIÁLOGO 6: SELECTOR DE FECHAS CUSTOME GRÁFICO (CALENDARIO COMPLETO)
+    // =========================================================================
     public static class DialogoSelectorFecha extends JDialog {
         private boolean confirmado = false;
         private Date fechaSeleccionada;
+
+        // Rango de fechas utilizado por el Centro de Pagos a Empleados.
         private LocalDate inicioRango;
         private LocalDate finRango;
         private boolean modoRango = false;
 
         private Calendar calendario;
+
         private JLabel lblMesAño;
         private JPanel panelCuadrillaDias;
         private JButton[] botonesDias;
 
+        /**
+         * Constructor original conservado para compatibilidad.
+         */
         public DialogoSelectorFecha(JDialog padre, Date fechaInicial) {
             this(padre, fechaInicial, null, null, false);
         }
 
-        public DialogoSelectorFecha(JDialog padre, Date fechaInicial, LocalDate inicio, LocalDate fin, boolean esRango) {
+        /**
+         * Constructor utilizado por VentasController para pagos diarios,
+         * semanales y mensuales.
+         */
+        public DialogoSelectorFecha(
+                JDialog padre,
+                Date fechaInicial,
+                LocalDate inicio,
+                LocalDate fin,
+                boolean esRango) {
+
             super(padre, "Calendario — Seleccionar Fecha", true);
             setSize(380, 380);
             setLocationRelativeTo(padre);
@@ -1309,15 +1501,18 @@ public class MainFrame extends JFrame {
             this.finRango = fin != null ? fin : LocalDate.now();
 
             this.calendario = new GregorianCalendar();
-            this.calendario.setTime(fechaInicial != null ? fechaInicial : new Date());
+            this.calendario.setTime(
+                    fechaInicial != null ? fechaInicial : new Date()
+            );
 
-            botonesDias = new JButton[42];
+            botonesDias = new JButton[42]; // 6 semanas x 7 días
 
             inicializarComponentesCalendario();
             actualizarCuadrillaCalendario();
         }
 
         private void inicializarComponentesCalendario() {
+            // Header del Calendario (Navegación Mes / Año)
             JPanel panelHeader = new JPanel(new BorderLayout(5, 5));
             panelHeader.setBackground(COLOR_OSCURO);
             panelHeader.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
@@ -1354,6 +1549,7 @@ public class MainFrame extends JFrame {
 
             add(panelHeader, BorderLayout.NORTH);
 
+            // Panel Central con Nombres de Días y Matriz de Botones
             JPanel panelCentral = new JPanel(new BorderLayout(2, 2));
             panelCentral.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
 
@@ -1380,9 +1576,21 @@ public class MainFrame extends JFrame {
                         calendario.set(Calendar.DAY_OF_MONTH, dia);
                         fechaSeleccionada = calendario.getTime();
 
-                        java.time.LocalDate ld = fechaSeleccionada.toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate();
-                        inicioRango = ld;
-                        finRango = ld;
+                        LocalDate fechaLocal = fechaSeleccionada
+                                .toInstant()
+                                .atZone(ZoneId.systemDefault())
+                                .toLocalDate();
+
+                        // El selector conserva el rango recibido. Para la
+                        // selección normal de una fecha se actualiza el inicio
+                        // y fin al mismo día seleccionado.
+                        if (modoRango) {
+                            inicioRango = fechaLocal;
+                            finRango = fechaLocal;
+                        } else {
+                            inicioRango = fechaLocal;
+                            finRango = fechaLocal;
+                        }
 
                         confirmado = true;
                         dispose();
@@ -1398,6 +1606,7 @@ public class MainFrame extends JFrame {
 
             add(panelCentral, BorderLayout.CENTER);
 
+            // Footer con Botón Hoy y Cancelar
             JPanel panelFooter = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 8));
             panelFooter.setBackground(COLOR_FONDO);
 
@@ -1426,7 +1635,7 @@ public class MainFrame extends JFrame {
             Calendar calTemp = (Calendar) calendario.clone();
             calTemp.set(Calendar.DAY_OF_MONTH, 1);
 
-            int primerDiaSemana = calTemp.get(Calendar.DAY_OF_WEEK) - 1;
+            int primerDiaSemana = calTemp.get(Calendar.DAY_OF_WEEK) - 1; // 0 = Domingo
             int maxDiasMes = calTemp.getActualMaximum(Calendar.DAY_OF_MONTH);
 
             Calendar hoy = new GregorianCalendar();
@@ -1443,6 +1652,7 @@ public class MainFrame extends JFrame {
                     btn.setText(String.valueOf(diaNumero));
                     btn.setEnabled(true);
 
+                    // Resaltar día actual
                     boolean esHoy = (hoy.get(Calendar.YEAR) == calTemp.get(Calendar.YEAR)) &&
                                     (hoy.get(Calendar.MONTH) == calTemp.get(Calendar.MONTH)) &&
                                     (hoy.get(Calendar.DAY_OF_MONTH) == diaNumero);

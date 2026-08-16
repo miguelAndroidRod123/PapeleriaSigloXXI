@@ -8,8 +8,8 @@
     
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Nota: Verifica tu versión de Java, 26 es muy alta. Si tienes problemas, cámbiala a 17 o 21 -->
-        <maven.compiler.release>26</maven.compiler.release>
+        <!-- Nota: Si al compilar te genera problemas de versión, cámbiala a 17 o 21 -->
+        <maven.compiler.release>21</maven.compiler.release>
         <exec.mainClass>sigloxxi.ventaspapeleria.VentasPapeleria</exec.mainClass>
     </properties>
 
@@ -49,6 +49,7 @@
             <artifactId>pdfbox</artifactId>
             <version>2.0.30</version>
         </dependency>
+        
         <!-- Lector y Creador de PDFs (iText) -->
         <dependency>
             <groupId>com.itextpdf</groupId>
@@ -56,4 +57,40 @@
             <version>5.5.13.3</version>
         </dependency>
     </dependencies>
+
+    <!-- Plugin para empaquetar librerías excluyendo firmas de seguridad duplicadas -->
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>sigloxxi.ventaspapeleria.VentasPapeleria</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

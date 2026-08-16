@@ -68,16 +68,50 @@ public class InventarioModelo {
         String rutaGuardada = prefs.get("RUTA_EXCEL_INVENTARIO", null);
         File archivoExcel = null;
 
-        if (rutaGuardada != null) {
+        // =====================================================================
+        // DETECCIÓN AUTOMÁTICA DE LA BASE DE DATOS DE INVENTARIO
+        // ---------------------------------------------------------------------
+        // 1. Ruta guardada anteriormente.
+        // 2. Ubicaciones conocidas del proyecto/aplicación.
+        // 3. Documentos / Escritorio / OneDrive.
+        // 4. Búsqueda controlada por nombre.
+        // 5. Si no se encuentra, se conserva la selección manual original.
+        // =====================================================================
+
+        if (rutaGuardada != null && !rutaGuardada.isBlank()) {
             archivoExcel = new File(rutaGuardada);
+
+            if (archivoExcel.exists() && archivoExcel.isFile()) {
+                return archivoExcel;
+            }
+
+            // La ruta guardada dejó de ser válida.
+            prefs.remove("RUTA_EXCEL_INVENTARIO");
         }
 
+        archivoExcel = buscarInventarioAutomaticamente();
+
+        if (archivoExcel != null && archivoExcel.exists()) {
+            prefs.put("RUTA_EXCEL_INVENTARIO", archivoExcel.getAbsolutePath());
+
+            System.out.println(
+                    "Inventario Excel detectado automáticamente en: "
+                    + archivoExcel.getAbsolutePath()
+            );
+
+            return archivoExcel;
+        }
+
+        // ---------------------------------------------------------------------
+        // Si no fue posible localizarlo automáticamente, se conserva el
+        // comportamiento original: selección manual.
+        // ---------------------------------------------------------------------
         while (archivoExcel == null || !archivoExcel.exists()) {
             int opcion = JOptionPane.showConfirmDialog(parent, """
-                                                             ⚠️ No se encontró la Base de Datos de Inventario (Excel).
-                                                             
-                                                             El archivo se ha borrado, movido o es la primera vez que inicia el sistema.
-                                                             ¿Desea ubicar el archivo manualmente en su equipo?""",
+                                                            ⚠️ No se encontró la Base de Datos de Inventario (Excel).
+
+                                                            El archivo se ha borrado, movido o es la primera vez que inicia el sistema.
+                                                            ¿Desea ubicar el archivo manualmente en su equipo?""",
                     "Base de Datos No Encontrada",
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.WARNING_MESSAGE
@@ -92,12 +126,15 @@ public class InventarioModelo {
                 if (seleccion == JFileChooser.APPROVE_OPTION) {
                     archivoExcel = fileChooser.getSelectedFile();
 
-                    if (archivoExcel.exists()) {
+                    if (archivoExcel.exists() && archivoExcel.isFile()) {
                         prefs.put("RUTA_EXCEL_INVENTARIO", archivoExcel.getAbsolutePath());
+
                         JOptionPane.showMessageDialog(parent,
                                 "¡Ubicación actualizada con éxito!\n" + archivoExcel.getAbsolutePath(),
                                 "Conexión Exitosa",
                                 JOptionPane.INFORMATION_MESSAGE);
+
+                        return archivoExcel;
                     }
                 } else {
                     // Si el usuario cancela la búsqueda en la ventana de archivos, salimos para evitar bucle infinito
@@ -113,6 +150,308 @@ public class InventarioModelo {
         }
 
         return archivoExcel;
+    }
+
+    // =========================================================================
+    // MÉTODOS AUXILIARES PARA DETECCIÓN AUTOMÁTICA DEL INVENTARIO
+    // =========================================================================
+
+    /**
+     * Busca automáticamente el archivo Excel del inventario en ubicaciones
+     * probables sin obligar al usuario a seleccionarlo manualmente.
+     */
+    private File buscarInventarioAutomaticamente() {
+        List<File> ubicacionesPrioritarias = new ArrayList<>();
+
+        // 1) Directorio desde el cual se lanzó Java.
+        agregarUbicacionSiExiste(
+                ubicacionesPrioritarias,
+                new File(System.getProperty("user.dir"))
+        );
+
+        // 2) Carpeta donde está el JAR / clases de la aplicación.
+        File ubicacionAplicacion = obtenerUbicacionAplicacion();
+        if (ubicacionAplicacion != null) {
+            agregarUbicacionSiExiste(ubicacionesPrioritarias, ubicacionAplicacion);
+            agregarUbicacionSiExiste(ubicacionesPrioritarias, ubicacionAplicacion.getParentFile());
+
+            if (ubicacionAplicacion.getParentFile() != null) {
+                agregarUbicacionSiExiste(
+                        ubicacionesPrioritarias,
+                        ubicacionAplicacion.getParentFile().getParentFile()
+                );
+            }
+        }
+
+        // 3) Proyecto antiguo y proyecto actual.
+        agregarUbicacionSiExiste(
+                ubicacionesPrioritarias,
+                new File(System.getProperty("user.home"),
+                        "Documents/NetBeansProjects/ventasPapeleria")
+        );
+
+        agregarUbicacionSiExiste(
+                ubicacionesPrioritarias,
+                new File(System.getProperty("user.home"),
+                        "Documents/NetBeansProjects/PapeleriaSigloXXI")
+        );
+
+        // 4) Carpetas habituales del usuario.
+        File carpetaUsuario = FileSystemView.getFileSystemView().getHomeDirectory();
+
+        agregarUbicacionSiExiste(ubicacionesPrioritarias, carpetaUsuario);
+
+        agregarUbicacionSiExiste(
+                ubicacionesPrioritarias,
+                new File(System.getProperty("user.home"), "Documents")
+        );
+
+        agregarUbicacionSiExiste(
+                ubicacionesPrioritarias,
+                new File(System.getProperty("user.home"), "OneDrive/Documents")
+        );
+
+        agregarUbicacionSiExiste(
+                ubicacionesPrioritarias,
+                new File(System.getProperty("user.home"), "Desktop")
+        );
+
+        // 5) Primero probar nombres exactos.
+        String[] nombresExactos = {
+            "INVENTARIO PAPELERIA SIGLO XXI.xlsx",
+            "INVENTARIO PAPELERÍA SIGLO XXI.xlsx",
+            "INVENTARIO.xlsx",
+            "inventario.xlsx",
+            "Inventario.xlsx"
+        };
+
+        for (File carpeta : ubicacionesPrioritarias) {
+            File encontrado = buscarPorNombresExactos(carpeta, nombresExactos);
+
+            if (esExcelValido(encontrado)) {
+                return encontrado;
+            }
+        }
+
+        // 6) Como respaldo, búsqueda controlada por nombre.
+        for (File carpeta : ubicacionesPrioritarias) {
+            File encontrado = buscarPorNombreDeInventario(carpeta, 3);
+
+            if (esExcelValido(encontrado)) {
+                return encontrado;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Obtiene la carpeta real donde está el JAR/clase de la aplicación.
+     * Funciona desde NetBeans y desde un JAR ejecutable.
+     */
+    private File obtenerUbicacionAplicacion() {
+        try {
+            java.net.URI ubicacion = InventarioModelo.class
+                    .getProtectionDomain()
+                    .getCodeSource()
+                    .getLocation()
+                    .toURI();
+
+            File archivo = new File(ubicacion);
+
+            if (archivo.isFile()) {
+                return archivo.getParentFile();
+            }
+
+            return archivo;
+
+        } catch (Exception e) {
+            System.err.println(
+                    "No fue posible determinar la ubicación de la aplicación: "
+                    + e.getMessage()
+            );
+            return null;
+        }
+    }
+
+    /**
+     * Agrega una carpeta a la lista solo si existe.
+     * También evita duplicados.
+     */
+    private void agregarUbicacionSiExiste(List<File> ubicaciones, File carpeta) {
+        if (carpeta == null || !carpeta.exists() || !carpeta.isDirectory()) {
+            return;
+        }
+
+        try {
+            File absoluta = carpeta.getCanonicalFile();
+
+            for (File existente : ubicaciones) {
+                if (existente.getCanonicalFile().equals(absoluta)) {
+                    return;
+                }
+            }
+
+            ubicaciones.add(absoluta);
+
+        } catch (IOException e) {
+            if (!ubicaciones.contains(carpeta)) {
+                ubicaciones.add(carpeta);
+            }
+        }
+    }
+
+    /**
+     * Busca nombres conocidos en la carpeta y en el primer nivel de subcarpetas.
+     */
+    private File buscarPorNombresExactos(File carpeta, String[] nombres) {
+        if (carpeta == null || !carpeta.exists() || !carpeta.isDirectory()) {
+            return null;
+        }
+
+        for (String nombre : nombres) {
+            File archivo = new File(carpeta, nombre);
+
+            if (esExcelValido(archivo)) {
+                return archivo;
+            }
+        }
+
+        File[] subcarpetas = carpeta.listFiles(File::isDirectory);
+
+        if (subcarpetas != null) {
+            for (File subcarpeta : subcarpetas) {
+                for (String nombre : nombres) {
+                    File archivo = new File(subcarpeta, nombre);
+
+                    if (esExcelValido(archivo)) {
+                        return archivo;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Búsqueda recursiva limitada para evitar recorrer todo el disco.
+     */
+    private File buscarPorNombreDeInventario(File carpeta, int profundidadMaxima) {
+        if (carpeta == null
+                || !carpeta.exists()
+                || !carpeta.isDirectory()
+                || profundidadMaxima < 0) {
+            return null;
+        }
+
+        File[] elementos = carpeta.listFiles();
+
+        if (elementos == null) {
+            return null;
+        }
+
+        // Primero archivos del nivel actual.
+        for (File elemento : elementos) {
+            if (elemento.isFile() && esNombreDeInventario(elemento.getName())) {
+                if (esExcelValido(elemento)) {
+                    return elemento;
+                }
+            }
+        }
+
+        if (profundidadMaxima == 0) {
+            return null;
+        }
+
+        // Luego subcarpetas.
+        for (File elemento : elementos) {
+            if (!elemento.isDirectory()) {
+                continue;
+            }
+
+            String nombreCarpeta =
+                    elemento.getName().toLowerCase(java.util.Locale.ROOT);
+
+            // Evitar carpetas generadas o innecesarias.
+            if (nombreCarpeta.equals("target")
+                    || nombreCarpeta.equals("node_modules")
+                    || nombreCarpeta.equals(".git")
+                    || nombreCarpeta.equals("$recycle.bin")
+                    || nombreCarpeta.equals("appdata")) {
+                continue;
+            }
+
+            File encontrado = buscarPorNombreDeInventario(
+                    elemento,
+                    profundidadMaxima - 1
+            );
+
+            if (esExcelValido(encontrado)) {
+                return encontrado;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Determina si el nombre corresponde a un posible archivo de inventario.
+     */
+    private boolean esNombreDeInventario(String nombreArchivo) {
+        if (nombreArchivo == null) {
+            return false;
+        }
+
+        String nombre =
+                nombreArchivo.toLowerCase(java.util.Locale.ROOT);
+
+        if (!nombre.endsWith(".xlsx")) {
+            return false;
+        }
+
+        return nombre.contains("inventario")
+                || (nombre.contains("papeleria") && nombre.contains("siglo"));
+    }
+
+    /**
+     * Validación final del archivo encontrado.
+     */
+    private boolean esExcelValido(File archivo) {
+        return archivo != null
+                && archivo.exists()
+                && archivo.isFile()
+                && archivo.getName()
+                        .toLowerCase(java.util.Locale.ROOT)
+                        .endsWith(".xlsx");
+    }
+
+    /**
+     * Permite abrir directamente el buscador de archivos para vincular una nueva base de datos,
+     * desactivando el modo de pruebas y guardando la nueva ruta seleccionada.
+     */
+    public boolean seleccionarNuevoArchivoExcel(Component parent) {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Seleccionar Base de Datos de Inventario (.xlsx)");
+        fileChooser.setFileFilter(new FileNameExtensionFilter("Archivos de Excel (*.xlsx)", "xlsx"));
+
+        int seleccion = fileChooser.showOpenDialog(parent);
+        if (seleccion == JFileChooser.APPROVE_OPTION) {
+            File nuevoArchivo = fileChooser.getSelectedFile();
+
+            if (nuevoArchivo.exists()) {
+                Preferences prefs = Preferences.userNodeForPackage(InventarioModelo.class);
+                prefs.put("RUTA_EXCEL_INVENTARIO", nuevoArchivo.getAbsolutePath());
+                this.modoPruebas = false; // Desactiva modo pruebas para usar la base de datos real seleccionada
+
+                JOptionPane.showMessageDialog(parent,
+                        "¡Ubicación actualizada con éxito!\n" + nuevoArchivo.getAbsolutePath(),
+                        "Conexión Exitosa",
+                        JOptionPane.INFORMATION_MESSAGE);
+                return true;
+            }
+        }
+        return false;
     }
 
     public List<Producto> buscarEnExcel(String criterio, Component parent) {
