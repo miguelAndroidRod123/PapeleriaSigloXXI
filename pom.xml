@@ -1,96 +1,234 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
     <modelVersion>4.0.0</modelVersion>
+
+    <!-- ============================================================
+         INFORMACIÓN DEL PROYECTO
+         ============================================================ -->
     <groupId>siglo-XXI</groupId>
     <artifactId>ventasPapeleria</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
-    
+
+    <!-- ============================================================
+         PROPIEDADES
+         ============================================================ -->
     <properties>
+
+        <!-- Codificación general del proyecto -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Nota: Si al compilar te genera problemas de versión, cámbiala a 17 o 21 -->
+
+        <!--
+            El proyecto se compila para Java 21.
+            Esto es importante para que sea compatible con
+            el JDK 21 que acabamos de instalar.
+        -->
         <maven.compiler.release>21</maven.compiler.release>
+
+        <!-- Clase principal -->
         <exec.mainClass>sigloxxi.ventaspapeleria.VentasPapeleria</exec.mainClass>
+
     </properties>
 
+    <!-- ============================================================
+         DEPENDENCIAS
+         ============================================================ -->
     <dependencies>
-        <!-- Interfaz Gráfica Moderna (FlatLaf) -->
+
+        <!-- ========================================================
+             INTERFAZ GRÁFICA MODERNA - FLATLAF
+             ======================================================== -->
         <dependency>
             <groupId>com.formdev</groupId>
             <artifactId>flatlaf</artifactId>
             <version>3.6</version>
             <type>jar</type>
         </dependency>
-        
-        <!-- Manejo base de archivos Excel -->
+
+        <!-- ========================================================
+             APACHE POI - MANEJO DE ARCHIVOS EXCEL
+             ======================================================== -->
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi</artifactId>
             <version>5.2.3</version>
         </dependency>
-        
-        <!-- Lector de archivos Excel modernos (.xlsx) -->
+
+        <!-- ========================================================
+             APACHE POI OOXML - ARCHIVOS .XLSX
+             ======================================================== -->
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
             <version>5.2.3</version>
         </dependency>
-        
-        <!-- Dependencia necesaria para evitar errores de Log4j con POI -->
+
+        <!-- ========================================================
+             LOG4J - NECESARIO PARA APACHE POI
+             ======================================================== -->
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
             <version>2.19.0</version>
         </dependency>
 
-        <!-- Lector de reportes PDF -->
+        <!-- ========================================================
+             PDFBOX - LECTOR DE PDF
+             ======================================================== -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>2.0.30</version>
         </dependency>
-        
-        <!-- Lector y Creador de PDFs (iText) -->
+
+        <!-- ========================================================
+             ITEXT - CREACIÓN DE PDF
+             ======================================================== -->
         <dependency>
             <groupId>com.itextpdf</groupId>
             <artifactId>itextpdf</artifactId>
             <version>5.5.13.3</version>
         </dependency>
+
     </dependencies>
 
-    <!-- Plugin para empaquetar librerías excluyendo firmas de seguridad duplicadas -->
+    <!-- ============================================================
+         CONFIGURACIÓN DE COMPILACIÓN Y EMPAQUETADO
+         ============================================================ -->
     <build>
+
+        <!-- ========================================================
+             RECURSOS DEL PROYECTO
+             
+             IMPORTANTE:
+             Aquí hacemos que Maven incluya la carpeta "imagenes"
+             dentro del JAR final.
+
+             Estructura esperada:
+
+             PapeleriaSigloXXI/
+             ├── imagenes/
+             │   ├── ICONOS/
+             │   └── IMAGENES-DINERO/
+             ├── src/
+             ├── pom.xml
+             └── ...
+
+             Después de compilar, Maven copiará:
+
+             imagenes/
+                 ↓
+             target/classes/imagenes/
+
+             Y el maven-shade-plugin la incorporará al JAR.
+             ======================================================== -->
+        <resources>
+
+            <!--
+                Conserva los recursos estándar de Maven:
+                src/main/resources
+            -->
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+
+            <!--
+                Recursos visuales del sistema.
+
+                Toma la carpeta "imagenes" ubicada en la raíz
+                del proyecto y la coloca dentro del JAR bajo:
+
+                /imagenes/
+            -->
+            <resource>
+                <directory>imagenes</directory>
+                <targetPath>imagenes</targetPath>
+                <filtering>false</filtering>
+            </resource>
+
+        </resources>
+
+        <!-- ========================================================
+             PLUGINS DE MAVEN
+             ======================================================== -->
         <plugins>
+
+            <!-- ====================================================
+                 MAVEN SHADE PLUGIN
+
+                 Genera el JAR ejecutable incluyendo las
+                 dependencias necesarias.
+                 ==================================================== -->
             <plugin>
+
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.5.0</version>
+
                 <executions>
+
                     <execution>
+
                         <phase>package</phase>
+
                         <goals>
                             <goal>shade</goal>
                         </goals>
+
                         <configuration>
+
+                            <!-- ==================================
+                                 ELIMINAR FIRMAS DUPLICADAS
+                                 ================================== -->
                             <filters>
+
                                 <filter>
+
                                     <artifact>*:*</artifact>
+
                                     <excludes>
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
                                     </excludes>
+
                                 </filter>
+
                             </filters>
+
+                            <!-- ==================================
+                                 MANIFEST DEL JAR
+
+                                 Indica cuál es la clase principal
+                                 de la aplicación.
+                                 ================================== -->
                             <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>sigloxxi.ventaspapeleria.VentasPapeleria</mainClass>
+
+                                <transformer
+                                    implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+
+                                    <mainClass>
+                                        sigloxxi.ventaspapeleria.VentasPapeleria
+                                    </mainClass>
+
                                 </transformer>
+
                             </transformers>
+
                         </configuration>
+
                     </execution>
+
                 </executions>
+
             </plugin>
+
         </plugins>
+
     </build>
+
 </project>
