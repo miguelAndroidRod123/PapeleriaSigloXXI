@@ -5,9 +5,11 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.filechooser.FileSystemView;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.print.PrinterException;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
@@ -15,6 +17,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.prefs.Preferences;
@@ -29,6 +32,7 @@ public class VentasController {
     private final String nombreEmpleado;
 
     private static final String VERSION_SOFTWARE = "v1.0.0";
+    private static final String NOMBRE_ARCHIVO_SESION = "sesion_actual.recuperacion";
     private static final List<String> registroVentasDelDia = new ArrayList<>();
     private static double acumuladoTotalDia = 0.0;
     private static double acumuladoEfectivo = 0.0;
@@ -40,6 +44,7 @@ public class VentasController {
     private static int contadorFacturas = 1;
 
     private double totalGeneral = 0.0;
+    private javax.swing.Timer timerMonitorInventario;
 
     public VentasController(MainFrame vista, InventarioModelo modeloInventario, String nombreEmpleado) {
         this.vista = vista;
@@ -47,6 +52,236 @@ public class VentasController {
         this.nombreEmpleado = nombreEmpleado;
 
         initListeners();
+        verificarSesionInterrumpida();
+        iniciarMonitorInventario();
+    }
+
+    /**
+     * Verifica el estado REAL de la conexión con el inventario Excel
+     * (sin diálogos emergentes) y refleja ese resultado en el indicador
+     * de la barra de estado. Se ejecuta al iniciar y luego periódicamente,
+     * para que el punto verde/rojo siempre corresponda a la realidad y no
+     * a un texto fijo de adorno.
+     */
+    private void actualizarIndicadorInventario() {
+        File archivo = modeloInventario.verificarConexionSilenciosa();
+        boolean conectado = (archivo != null);
+        String detalle = conectado ? archivo.getName() : null;
+        SwingUtilities.invokeLater(() -> vista.actualizarEstadoInventario(conectado, detalle));
+    }
+
+    private void iniciarMonitorInventario() {
+        actualizarIndicadorInventario();
+        timerMonitorInventario = new javax.swing.Timer(8000, e -> actualizarIndicadorInventario());
+        timerMonitorInventario.start();
+    }
+
+    // =========================================================================
+    // RESPALDO Y RECUPERACIÓN DE SESIÓN ANTE CIERRES INESPERADOS
+    // -------------------------------------------------------------------------
+    // Guarda el carrito en curso y los acumulados del día en un archivo local
+    // cada vez que hay un cambio relevante. Si el programa se cierra de forma
+    // abrupta (corte de energía, cuelgue, cierre accidental) antes de exportar
+    // la venta del día, al volver a abrir se ofrece restaurar todo tal como
+    // estaba, sin tener que volver a digitar nada.
+    // =========================================================================
+    private File obtenerArchivoSesion() {
+        File escritorio = FileSystemView.getFileSystemView().getHomeDirectory();
+        File carpetaSesion = new File(new File(escritorio, "DOCUMENTOS SIGLO XXI"), "SESION");
+        if (!carpetaSesion.exists()) {
+            carpetaSesion.mkdirs();
+        }
+        return new File(carpetaSesion, NOMBRE_ARCHIVO_SESION);
+    }
+
+    private String codificar(String texto) {
+        return Base64.getEncoder().encodeToString(texto.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String decodificar(String textoBase64) {
+        return new String(Base64.getDecoder().decode(textoBase64), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Vuelca el estado actual de la sesión (carrito en curso + acumulados
+     * del día) al archivo de respaldo. Se llama después de cada acción que
+     * cambia ese estado, para que el respaldo esté siempre al día sin
+     * depender de un cierre ordenado del programa.
+     */
+    private void guardarSesionActual() {
+        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
+                new FileOutputStream(obtenerArchivoSesion()), StandardCharsets.UTF_8))) {
+
+            writer.println("FECHA_SESION=" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
+            writer.println("EMPLEADO=" + codificar(nombreEmpleado == null ? "" : nombreEmpleado));
+            writer.println("CONTADOR_FACTURAS=" + contadorFacturas);
+            writer.println("ACUMULADO_TOTAL_DIA=" + acumuladoTotalDia);
+            writer.println("ACUMULADO_EFECTIVO=" + acumuladoEfectivo);
+            writer.println("ACUMULADO_TRANSFERENCIA=" + acumuladoTransferencia);
+            writer.println("ACUMULADO_COSTO_MAYORISTA_DIA=" + acumuladoCostoMayoristaDia);
+            writer.println("ACUMULADO_PAGOS_EMPLEADOS_DIA=" + acumuladoPagosEmpleadosDia);
+            writer.println("TOTAL_GENERAL_CARRITO=" + totalGeneral);
+
+            writer.println("---CARRITO---");
+            DefaultTableModel modelo = vista.getModeloTabla();
+            for (int i = 0; i < modelo.getRowCount(); i++) {
+                StringBuilder fila = new StringBuilder();
+                for (int c = 0; c < modelo.getColumnCount(); c++) {
+                    Object valor = modelo.getValueAt(i, c);
+                    fila.append(valor == null ? "" : valor.toString());
+                    if (c < modelo.getColumnCount() - 1) fila.append("|");
+                }
+                writer.println(codificar(fila.toString()));
+            }
+
+            writer.println("---VENTAS_DEL_DIA---");
+            for (String venta : registroVentasDelDia) {
+                writer.println(codificar(venta));
+            }
+
+            writer.println("---PAGOS_EMPLEADOS_DIA---");
+            for (String pago : registroPagosEmpleadosDia) {
+                writer.println(codificar(pago));
+            }
+
+            writer.println("---FIN---");
+        } catch (IOException e) {
+            System.err.println("No se pudo guardar el respaldo de la sesión: " + e.getMessage());
+        }
+    }
+
+    /** Elimina el respaldo de sesión: se llama cuando ya no hace falta (día exportado y cerrado en orden, o el usuario descarta la recuperación). */
+    private void borrarArchivoSesion() {
+        File archivo = obtenerArchivoSesion();
+        if (archivo.exists()) {
+            archivo.delete();
+        }
+    }
+
+    /**
+     * Al iniciar el programa, revisa si quedó un respaldo de una sesión del
+     * MISMO día que no se cerró en orden (venta en curso o ventas cobradas
+     * que aún no se habían exportado). Si lo encuentra, ofrece restaurarlo.
+     * Un respaldo de un día anterior se descarta en silencio: ya no aplica.
+     */
+    private void verificarSesionInterrumpida() {
+        File archivo = obtenerArchivoSesion();
+        if (!archivo.exists()) {
+            return;
+        }
+
+        try {
+            List<String> lineas = new ArrayList<>();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(new FileInputStream(archivo), StandardCharsets.UTF_8))) {
+                String linea;
+                while ((linea = reader.readLine()) != null) {
+                    lineas.add(linea);
+                }
+            }
+
+            String fechaSesion = null;
+            for (String linea : lineas) {
+                if (linea.startsWith("FECHA_SESION=")) {
+                    fechaSesion = linea.substring("FECHA_SESION=".length());
+                    break;
+                }
+            }
+
+            String hoy = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+            if (fechaSesion == null || !fechaSesion.equals(hoy)) {
+                // Respaldo de un día distinto: ya no es relevante, se descarta.
+                borrarArchivoSesion();
+                return;
+            }
+
+            boolean hayAlgoQueRecuperar = false;
+            String seccion = "";
+            for (String linea : lineas) {
+                if (linea.equals("---CARRITO---") || linea.equals("---VENTAS_DEL_DIA---")
+                        || linea.equals("---PAGOS_EMPLEADOS_DIA---") || linea.equals("---FIN---")) {
+                    seccion = linea;
+                    continue;
+                }
+                if (!seccion.isEmpty() && !linea.isBlank()) {
+                    hayAlgoQueRecuperar = true;
+                    break;
+                }
+            }
+
+            if (!hayAlgoQueRecuperar) {
+                // El carrito estaba vacío y no había ventas del día: nada que recuperar.
+                borrarArchivoSesion();
+                return;
+            }
+
+            int opcion = JOptionPane.showConfirmDialog(vista,
+                    "Se detectó que el sistema no se cerró correctamente la última vez\n"
+                    + "(posible corte de energía o cierre inesperado) y hay ventas de hoy\n"
+                    + "que aún no se habían exportado.\n\n"
+                    + "¿Desea recuperar el carrito y las ventas acumuladas del día tal como estaban?",
+                    "Sesión Anterior Sin Cerrar",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+
+            if (opcion == JOptionPane.YES_OPTION) {
+                restaurarSesionDesdeLineas(lineas);
+                JOptionPane.showMessageDialog(vista,
+                        "Sesión restaurada con éxito. Puede continuar donde se quedó.",
+                        "Recuperación Completa",
+                        JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                borrarArchivoSesion();
+            }
+        } catch (Exception e) {
+            System.err.println("No se pudo leer el respaldo de sesión: " + e.getMessage());
+        }
+    }
+
+    private void restaurarSesionDesdeLineas(List<String> lineas) {
+        String seccionActual = "";
+        for (String linea : lineas) {
+            if (linea.equals("---CARRITO---") || linea.equals("---VENTAS_DEL_DIA---")
+                    || linea.equals("---PAGOS_EMPLEADOS_DIA---") || linea.equals("---FIN---")) {
+                seccionActual = linea;
+                continue;
+            }
+
+            if (seccionActual.isEmpty()) {
+                if (linea.startsWith("CONTADOR_FACTURAS=")) {
+                    contadorFacturas = Integer.parseInt(linea.substring(linea.indexOf('=') + 1));
+                } else if (linea.startsWith("ACUMULADO_TOTAL_DIA=")) {
+                    acumuladoTotalDia = Double.parseDouble(linea.substring(linea.indexOf('=') + 1));
+                } else if (linea.startsWith("ACUMULADO_EFECTIVO=")) {
+                    acumuladoEfectivo = Double.parseDouble(linea.substring(linea.indexOf('=') + 1));
+                } else if (linea.startsWith("ACUMULADO_TRANSFERENCIA=")) {
+                    acumuladoTransferencia = Double.parseDouble(linea.substring(linea.indexOf('=') + 1));
+                } else if (linea.startsWith("ACUMULADO_COSTO_MAYORISTA_DIA=")) {
+                    acumuladoCostoMayoristaDia = Double.parseDouble(linea.substring(linea.indexOf('=') + 1));
+                } else if (linea.startsWith("ACUMULADO_PAGOS_EMPLEADOS_DIA=")) {
+                    acumuladoPagosEmpleadosDia = Double.parseDouble(linea.substring(linea.indexOf('=') + 1));
+                } else if (linea.startsWith("TOTAL_GENERAL_CARRITO=")) {
+                    totalGeneral = Double.parseDouble(linea.substring(linea.indexOf('=') + 1));
+                }
+            } else if (seccionActual.equals("---CARRITO---")) {
+                String[] campos = decodificar(linea).split("\\|", -1);
+                if (campos.length == 6) {
+                    vista.getModeloTabla().addRow(new Object[]{
+                        campos[0], campos[1], Integer.parseInt(campos[2]), campos[3], campos[4], campos[5]
+                    });
+                }
+            } else if (seccionActual.equals("---VENTAS_DEL_DIA---")) {
+                registroVentasDelDia.add(decodificar(linea));
+            } else if (seccionActual.equals("---PAGOS_EMPLEADOS_DIA---")) {
+                registroPagosEmpleadosDia.add(decodificar(linea));
+            }
+        }
+
+        vista.getLblTotal().setText(String.format("TOTAL: $%.2f", totalGeneral));
+        if (!registroVentasDelDia.isEmpty()) {
+            vista.getTxtConsolaVentas().append("• Sesión recuperada: " + registroVentasDelDia.size()
+                    + " venta(s) del día restauradas desde el respaldo.\n");
+        }
     }
 
     private void initListeners() {
@@ -110,23 +345,84 @@ public class VentasController {
         List<Producto> coincidencias = modeloInventario.buscarEnExcel(busqueda, vista);
         Producto producto = elegirProductoDeLista(coincidencias, busqueda);
 
-        if (producto != null) {
-            if (producto.getPrecio() <= 0) {
-                JOptionPane.showMessageDialog(vista, "El producto '" + producto.getNombre() + "' no tiene un precio asignado ($0). No se puede agregar al carrito.", "Producto sin precio", JOptionPane.ERROR_MESSAGE);
+        if (producto == null) {
+            return;
+        }
+
+        if (producto.getPrecio() <= 0) {
+            JOptionPane.showMessageDialog(vista,
+                    "El producto '" + producto.getNombre() + "' no tiene un precio unitario asignado ($0).\n"
+                    + "Para impresión 3D, el Precio Unitario del Excel representa tu cobro base/ganancia de gestión.",
+                    "Producto sin precio",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (!producto.esServicioONoAplica()) {
+            if (producto.getCantidadDisponible() <= 0) {
+                JOptionPane.showMessageDialog(vista,
+                        "El producto '" + producto.getNombre() + "' no tiene stock disponible (Cantidad: 0).",
+                        "Producto sin stock",
+                        JOptionPane.WARNING_MESSAGE);
                 return;
             }
 
-            if (!producto.esServicioONoAplica()) {
-                if (producto.getCantidadDisponible() <= 0) {
-                    JOptionPane.showMessageDialog(vista, "El producto '" + producto.getNombre() + "' no tiene stock disponible (Cantidad: 0).", "Producto sin stock", JOptionPane.WARNING_MESSAGE);
-                    return;
-                }
+            if (producto.getCantidadDisponible() < 10) {
+                JOptionPane.showMessageDialog(vista,
+                        "¡Atención! Quedan menos de 10 unidades en stock.\n"
+                        + "Solicitar pedido para surtir: " + producto.getNombre()
+                        + " (" + producto.getCantidadDisponible() + " unidades).",
+                        "Aviso de Inventario Bajo",
+                        JOptionPane.INFORMATION_MESSAGE);
+            }
+        }
 
-                if (producto.getCantidadDisponible() < 10) {
-                    JOptionPane.showMessageDialog(vista, "¡Atención! Quedan menos de 10 unidades en stock.\nSolicitar pedido para surtir: " + producto.getNombre() + " (" + producto.getCantidadDisponible() + " unidades).", "Aviso de Inventario Bajo", JOptionPane.INFORMATION_MESSAGE);
-                }
+        // =====================================================================
+        // CASO ESPECIAL EXCLUSIVO: "impresión 3d pedido"
+        // =====================================================================
+        // El Precio Unitario del Excel NO es el precio final: representa el
+        // cobro base/ganancia por gestión. El costo variable del proveedor se
+        // solicita aquí en cada pedido. El envío se cobra solamente si el
+        // usuario marca la casilla correspondiente.
+        boolean esImpresion3DPedido = "impresión 3d pedido".equalsIgnoreCase(
+                producto.getNombre() == null ? "" : producto.getNombre().trim());
+
+        if (esImpresion3DPedido) {
+            CotizacionImpresion3D cotizacion = mostrarDialogoCostoImpresion3D(
+                    producto.getNombre(), producto.getPrecio(), cantidad);
+
+            if (cotizacion == null) {
+                // El usuario canceló: no se agrega nada al carrito.
+                return;
             }
 
+            // En impresión 3D no se agrupan filas por código porque dos pedidos
+            // del mismo artículo pueden tener costos diferentes de proveedor.
+            double subtotal = cotizacion.totalCliente;
+            vista.getModeloTabla().addRow(new Object[]{
+                producto.getCodigo(),
+                producto.getNombre(),
+                cantidad,
+                String.format("%.2f", cotizacion.precioVentaUnitario),
+                String.format("%.2f", subtotal),
+                String.format("%.2f", cotizacion.costoRealUnitario)
+            });
+
+            totalGeneral += subtotal;
+
+            vista.agregarLogConsola(String.format(
+                    "IMPRESIÓN 3D PEDIDO | Proveedor/U: $%.2f | Base gestión/U: $%.2f | Envío: $%.2f | Cantidad: %d | Total cliente: $%.2f",
+                    cotizacion.precioProveedorUnitario,
+                    cotizacion.precioGestionUnitario,
+                    cotizacion.envioTotal,
+                    cantidad,
+                    cotizacion.totalCliente
+            ));
+
+        } else {
+            // =================================================================
+            // FLUJO NORMAL DE TODOS LOS DEMÁS PRODUCTOS
+            // =================================================================
             int filaExistente = -1;
             for (int i = 0; i < vista.getModeloTabla().getRowCount(); i++) {
                 String codTabla = vista.getModeloTabla().getValueAt(i, 0).toString();
@@ -157,12 +453,279 @@ public class VentasController {
                 });
                 totalGeneral += subtotal;
             }
-
-            vista.getLblTotal().setText(String.format("TOTAL: $%.2f", totalGeneral));
-            vista.getTxtBusqueda().setText("");
-            vista.getTxtCantidad().setText("1");
-            vista.getTxtBusqueda().requestFocus();
         }
+
+        vista.getLblTotal().setText(String.format("TOTAL: $%.2f", totalGeneral));
+        vista.getTxtBusqueda().setText("");
+        vista.getTxtCantidad().setText("1");
+        vista.getTxtBusqueda().requestFocus();
+        guardarSesionActual();
+    }
+
+    /**
+     * Datos calculados de una cotización de impresión 3D.
+     * precioProveedorUnitario = costo que cobra el proveedor por pieza.
+     * precioGestionUnitario   = Precio Unitario configurado en Excel.
+     * envioTotal              = costo de envío del pedido (si se marcó).
+     * costoRealUnitario       = costo que debe reflejarse como costo mayorista
+     *                           por pieza para calcular la utilidad real.
+     * precioVentaUnitario     = precio que verá el cliente por pieza.
+     * totalCliente            = total de la línea para la cantidad solicitada.
+     */
+    private static class CotizacionImpresion3D {
+        final double precioProveedorUnitario;
+        final double precioGestionUnitario;
+        final double envioTotal;
+        final double costoRealUnitario;
+        final double precioVentaUnitario;
+        final double totalCliente;
+
+        CotizacionImpresion3D(double precioProveedorUnitario,
+                              double precioGestionUnitario,
+                              double envioTotal,
+                              double costoRealUnitario,
+                              double precioVentaUnitario,
+                              double totalCliente) {
+            this.precioProveedorUnitario = precioProveedorUnitario;
+            this.precioGestionUnitario = precioGestionUnitario;
+            this.envioTotal = envioTotal;
+            this.costoRealUnitario = costoRealUnitario;
+            this.precioVentaUnitario = precioVentaUnitario;
+            this.totalCliente = totalCliente;
+        }
+    }
+
+    /**
+     * Solicita el costo variable del proveedor únicamente para el producto
+     * "impresión 3d pedido".
+     *
+     * Fórmula:
+     *   sin envío: (proveedor por pieza + gestión por pieza) × cantidad
+     *   con envío:  (proveedor por pieza + gestión por pieza) × cantidad + envío
+     *
+     * El envío se interpreta como costo total del pedido y se reparte entre
+     * las piezas para guardar un costo unitario correcto en el carrito.
+     */
+    private CotizacionImpresion3D mostrarDialogoCostoImpresion3D(
+            String nombreProducto,
+            double precioGestionUnitario,
+            int cantidad) {
+
+        final JDialog dialogo = new JDialog(vista,
+                "Cotización - Impresión 3D Pedido",
+                Dialog.ModalityType.APPLICATION_MODAL);
+        dialogo.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        dialogo.setSize(470, 390);
+        dialogo.setLocationRelativeTo(vista);
+        dialogo.setResizable(false);
+
+        JPanel panelPrincipal = new JPanel(new BorderLayout(10, 10));
+        panelPrincipal.setBorder(BorderFactory.createEmptyBorder(15, 18, 12, 18));
+        panelPrincipal.setBackground(Color.WHITE);
+
+        JPanel panelForm = new JPanel(new GridBagLayout());
+        panelForm.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+
+        JLabel lblTitulo = new JLabel("Cotización de Impresión 3D");
+        lblTitulo.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        lblTitulo.setForeground(MainFrame.COLOR_OSCURO);
+
+        JLabel lblProducto = new JLabel("Producto: " + nombreProducto);
+        lblProducto.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+
+        JLabel lblCantidad = new JLabel("Cantidad solicitada: " + cantidad);
+        lblCantidad.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+
+        JLabel lblPrecioGestion = new JLabel(
+                String.format("Precio Unitario Excel (gestión/ganancia): $%,.2f", precioGestionUnitario));
+        lblPrecioGestion.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        lblPrecioGestion.setForeground(MainFrame.COLOR_PRIMARIO_DARK);
+
+        JTextField txtPrecioProveedor = new JTextField();
+        txtPrecioProveedor.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        txtPrecioProveedor.setToolTipText("Precio que cobra el proveedor por cada pieza");
+
+        JCheckBox chkEnvio = new JCheckBox("Cobrar envío");
+        chkEnvio.setOpaque(false);
+        chkEnvio.setFont(new Font("Segoe UI", Font.BOLD, 12));
+
+        JTextField txtEnvio = new JTextField("0");
+        txtEnvio.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        txtEnvio.setEnabled(false);
+        txtEnvio.setToolTipText("Costo total del envío del pedido");
+
+        JLabel lblResultado = new JLabel("TOTAL AL CLIENTE: $0,00");
+        lblResultado.setFont(new Font("Segoe UI", Font.BOLD, 17));
+        lblResultado.setForeground(MainFrame.COLOR_EXITO);
+
+        JLabel lblDetalle = new JLabel(" ");
+        lblDetalle.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        lblDetalle.setForeground(MainFrame.COLOR_OSCURO);
+
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        panelForm.add(lblTitulo, gbc);
+        gbc.gridy++;
+        panelForm.add(lblProducto, gbc);
+        gbc.gridy++;
+        panelForm.add(lblCantidad, gbc);
+        gbc.gridy++;
+        panelForm.add(lblPrecioGestion, gbc);
+
+        gbc.gridwidth = 1;
+        gbc.gridy++;
+        gbc.gridx = 0;
+        panelForm.add(new JLabel("Precio del proveedor por pieza ($):"), gbc);
+        gbc.gridx = 1;
+        panelForm.add(txtPrecioProveedor, gbc);
+
+        gbc.gridy++;
+        gbc.gridx = 0;
+        panelForm.add(chkEnvio, gbc);
+        gbc.gridx = 1;
+        panelForm.add(txtEnvio, gbc);
+
+        gbc.gridy++;
+        gbc.gridx = 0; gbc.gridwidth = 2;
+        panelForm.add(lblDetalle, gbc);
+        gbc.gridy++;
+        panelForm.add(lblResultado, gbc);
+
+        JPanel panelAcciones = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 4));
+        panelAcciones.setOpaque(false);
+
+        JButton btnCancelar = new JButton("Cancelar");
+        JButton btnAceptar = new JButton("Aceptar");
+        btnAceptar.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btnAceptar.setBackground(MainFrame.COLOR_EXITO);
+        btnAceptar.setForeground(Color.WHITE);
+        btnAceptar.setFocusPainted(false);
+
+        panelAcciones.add(btnCancelar);
+        panelAcciones.add(btnAceptar);
+
+        panelPrincipal.add(panelForm, BorderLayout.CENTER);
+        panelPrincipal.add(panelAcciones, BorderLayout.SOUTH);
+        dialogo.setContentPane(panelPrincipal);
+
+        final CotizacionImpresion3D[] resultado = new CotizacionImpresion3D[1];
+
+        Runnable recalcular = () -> {
+            try {
+                double proveedor = parsearMontoFlexible(txtPrecioProveedor.getText());
+                double envio = chkEnvio.isSelected()
+                        ? parsearMontoFlexible(txtEnvio.getText())
+                        : 0.0;
+
+                if (proveedor < 0 || envio < 0 || precioGestionUnitario < 0) {
+                    throw new NumberFormatException();
+                }
+
+                double totalSinEnvio = (proveedor + precioGestionUnitario) * cantidad;
+                double totalCliente = totalSinEnvio + envio;
+                double costoRealUnitario = proveedor + (envio / cantidad);
+                double precioVentaUnitario = totalCliente / cantidad;
+
+                lblDetalle.setText(String.format(
+                        "Proveedor/U: $%,.2f  +  Gestión/U: $%,.2f  +  Envío: $%,.2f  =  $%,.2f",
+                        proveedor, precioGestionUnitario, envio, totalCliente));
+                lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.2f", totalCliente));
+                lblResultado.setForeground(MainFrame.COLOR_EXITO);
+            } catch (Exception ex) {
+                lblDetalle.setText("Ingrese un precio de proveedor válido.");
+                lblResultado.setText("TOTAL AL CLIENTE: $0,00");
+                lblResultado.setForeground(MainFrame.COLOR_PELIGRO);
+            }
+        };
+
+        DocumentListener recalculoListener = new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { recalcular.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { recalcular.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { recalcular.run(); }
+        };
+        txtPrecioProveedor.getDocument().addDocumentListener(recalculoListener);
+        txtEnvio.getDocument().addDocumentListener(recalculoListener);
+        chkEnvio.addActionListener(e -> {
+            txtEnvio.setEnabled(chkEnvio.isSelected());
+            if (chkEnvio.isSelected()) {
+                txtEnvio.requestFocus();
+                txtEnvio.selectAll();
+            }
+            recalcular.run();
+        });
+
+        btnCancelar.addActionListener(e -> dialogo.dispose());
+
+        btnAceptar.addActionListener(e -> {
+            try {
+                double proveedor = parsearMontoFlexible(txtPrecioProveedor.getText());
+                double envio = chkEnvio.isSelected()
+                        ? parsearMontoFlexible(txtEnvio.getText())
+                        : 0.0;
+
+                if (proveedor < 0 || envio < 0 || precioGestionUnitario < 0) {
+                    throw new NumberFormatException();
+                }
+
+                double totalCliente = (proveedor + precioGestionUnitario) * cantidad + envio;
+                double costoRealUnitario = proveedor + (envio / cantidad);
+                double precioVentaUnitario = totalCliente / cantidad;
+
+                resultado[0] = new CotizacionImpresion3D(
+                        proveedor,
+                        precioGestionUnitario,
+                        envio,
+                        costoRealUnitario,
+                        precioVentaUnitario,
+                        totalCliente);
+
+                dialogo.dispose();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialogo,
+                        "Ingrese valores numéricos válidos para el precio del proveedor"
+                        + (chkEnvio.isSelected() ? " y el envío." : "."),
+                        "Datos inválidos",
+                        JOptionPane.WARNING_MESSAGE);
+                txtPrecioProveedor.requestFocus();
+            }
+        });
+
+        dialogo.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowOpened(java.awt.event.WindowEvent e) {
+                txtPrecioProveedor.requestFocus();
+            }
+        });
+
+        dialogo.setVisible(true);
+        return resultado[0];
+    }
+
+    /** Convierte montos escritos con formato colombiano o decimal simple. */
+    private double parsearMontoFlexible(String texto) {
+        if (texto == null || texto.trim().isEmpty()) {
+            return 0.0;
+        }
+
+        String valor = texto.trim()
+                .replace("$", "")
+                .replace(" ", "");
+
+        // 20.000,50 -> 20000.50
+        if (valor.contains(".") && valor.contains(",")) {
+            valor = valor.replace(".", "").replace(",", ".");
+        } else if (valor.contains(",")) {
+            // 20000,50 -> 20000.50
+            valor = valor.replace(",", ".");
+        } else if (valor.matches(".*\\.\\d{3}$")) {
+            // 20.000 -> 20000
+            valor = valor.replace(".", "");
+        }
+
+        return Double.parseDouble(valor);
     }
 
     private void eliminarItemCarrito() {
@@ -173,6 +736,7 @@ public class VentasController {
             if (totalGeneral < 0) totalGeneral = 0.0;
             vista.getLblTotal().setText(String.format("TOTAL: $%.2f", totalGeneral));
             vista.getModeloTabla().removeRow(filaSeleccionada);
+            guardarSesionActual();
         } else {
             JOptionPane.showMessageDialog(vista, "Seleccione de la tabla el producto que desea eliminar.", "Aviso", JOptionPane.WARNING_MESSAGE);
         }
@@ -196,6 +760,7 @@ public class VentasController {
             vista.getTxtBusqueda().setText("");
             vista.getTxtCantidad().setText("1");
             vista.getTxtBusqueda().requestFocus();
+            guardarSesionActual();
         }
     }
 
@@ -315,8 +880,9 @@ public class VentasController {
         vista.getTxtConsolaVentas().setCaretPosition(vista.getTxtConsolaVentas().getDocument().getLength());
 
         modeloInventario.descontarStockExcel(itemsVendidos, vista);
+        actualizarIndicadorInventario();
 
-        // --- CONSTRUCCIÓN DEL TICKET DE IMPRESIÓN ---
+        // --- CONSTRUCCIÓN DEL TICKET DE IMPRESIÓN (CÓDIGO ORIGINAL EXACTO) ---
         StringBuilder ticket = new StringBuilder();
         ticket.append("         PAPELERÍA SIGLO XXI          \n");
         ticket.append("       COMPROBANTE DE COMPRA          \n");
@@ -353,6 +919,7 @@ public class VentasController {
         ticket.append("         ¡Gracias por su compra!      \n");
         ticket.append("======================================\n");
 
+        // --- VENTANA EMERGENTE RESTAURADA DE IMPRESIÓN ---
         int opcionImprimir = JOptionPane.showConfirmDialog(
                 vista,
                 "¡Venta #" + String.format("%03d", contadorFacturas) + " registrada con éxito!\n\n¿Desea imprimir la factura / comprobante de pago?",
@@ -369,6 +936,7 @@ public class VentasController {
         vista.getModeloTabla().setRowCount(0);
         totalGeneral = 0.0;
         vista.getLblTotal().setText("TOTAL: $0.00");
+        guardarSesionActual();
     }
 
     private void imprimirFacturaVenta(int numFactura, String contenidoTicket) {
@@ -499,13 +1067,13 @@ public class VentasController {
             Date fechaActual = dialogoPagos.getFechaSeleccionada();
             String conceptoSel = (String) dialogoPagos.getComboConcepto().getSelectedItem();
 
-            MainFrame.DialogoSelectorFecha selector = new MainFrame.DialogoSelectorFecha(
-                    dialogoPagos, 
-                    fechaActual, 
-                    dialogoPagos.getInicioRango(), 
-                    dialogoPagos.getFinRango(), 
-                    "Sueldo Semanal".equals(conceptoSel)
-            );
+           MainFrame.DialogoSelectorFecha selector = vista.new DialogoSelectorFecha(
+        dialogoPagos,
+        fechaActual,
+        dialogoPagos.getInicioRango(),
+        dialogoPagos.getFinRango(),
+        "Sueldo Semanal".equals(conceptoSel)
+);
             selector.setVisible(true);
 
             if (selector.isConfirmado()) {
@@ -533,7 +1101,7 @@ public class VentasController {
                     return;
                 }
                 if (monto <= 0) {
-                    JOptionPane.showMessageDialog(dialogoPagos, "El monto a pagar calculatedo debe ser mayor a $0.00.", "Aviso", JOptionPane.WARNING_MESSAGE);
+                    JOptionPane.showMessageDialog(dialogoPagos, "El monto a pagar calculado debe ser mayor a $0.00.", "Aviso", JOptionPane.WARNING_MESSAGE);
                     return;
                 }
 
@@ -562,6 +1130,7 @@ public class VentasController {
                     registroPagosEmpleadosDia.add(registroParaLista);
                     acumuladoPagosEmpleadosDia += monto;
                     dialogoPagos.getLblTotalPagadoHoy().setText(String.format("$%.2f", acumuladoPagosEmpleadosDia));
+                    guardarSesionActual();
 
                     JOptionPane.showMessageDialog(dialogoPagos, mensajeExito, "Registro Guardado", JOptionPane.INFORMATION_MESSAGE);
                     dialogoPagos.getTxtMontoPagar().setText("0.00");
@@ -1184,9 +1753,19 @@ public class VentasController {
         }
 
         btnRelinkBD.addActionListener(e -> {
-            boolean actualizado = modeloInventario.seleccionarNuevoArchivoExcel(vista);
-            if (actualizado) {
-                dialogoUpdates.dispose();
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("Seleccionar nueva Base de Datos (.xlsx)");
+            fileChooser.setFileFilter(new FileNameExtensionFilter("Archivos de Excel (*.xlsx)", "xlsx"));
+
+            int selec = fileChooser.showOpenDialog(dialogoUpdates);
+            if (selec == JFileChooser.APPROVE_OPTION) {
+                File nuevo = fileChooser.getSelectedFile();
+                if (nuevo.exists()) {
+                    Preferences prefs = Preferences.userNodeForPackage(InventarioModelo.class);
+                    prefs.put("RUTA_EXCEL_INVENTARIO", nuevo.getAbsolutePath());
+                    JOptionPane.showMessageDialog(dialogoUpdates, "¡Base de datos vinculada correctamente!\n\n" + nuevo.getAbsolutePath(), "Actualizado", JOptionPane.INFORMATION_MESSAGE);
+                    dialogoUpdates.dispose();
+                }
             }
         });
 
