@@ -21,9 +21,9 @@ public class InventarioModelo {
     private boolean modoPruebas = false;
     private final DataFormatter dataFormatter = new DataFormatter();
 
-    /** Constructor conservado para compatibilidad. Mantiene el modo de pruebas activado por defecto. */
+    /** Constructor conservado para compatibilidad. Por defecto arranca en modo producción. */
     public InventarioModelo() {
-        this(true);
+        this(false);
     }
 
     /** Permite controlar explícitamente el entorno desde el Main. */
@@ -39,31 +39,21 @@ public class InventarioModelo {
         this.modoPruebas = modoPruebas;
     }
 
+    /**
+     * Localiza el archivo de inventario Excel real: primero la ruta guardada
+     * anteriormente, luego una búsqueda automática por ubicaciones probables,
+     * y si no aparece, se le pide al usuario que lo ubique manualmente (y esa
+     * elección queda guardada para la próxima vez).
+     *
+     * NOTA: esta misma lógica se usa siempre, incluso si "Modo Pruebas" está
+     * activo (la bandera modoPruebas ahora solo afecta textos informativos
+     * como el título de la ventana). Antes existía una rama separada para
+     * pruebas que copiaba el Excel al directorio de trabajo actual; eso se
+     * quitó porque al instalarse en carpetas protegidas como
+     * "Program Files" no se puede escribir ahí sin permisos de administrador,
+     * lo que causaba el error "no se encontró el archivo de inventario".
+     */
     public File obtenerArchivoExcel(Component parent) {
-        if (modoPruebas) {
-            File archivoPruebas = new File("INVENTARIO_PRUEBAS.xlsx");
-            if (!archivoPruebas.exists()) {
-                File original = new File("INVENTARIO PAPELERIA SIGLO XXI.xlsx");
-                if (!original.exists()) original = new File("inventario.xlsx");
-
-                if (original.exists()) {
-                    try {
-                        Files.copy(original.toPath(), archivoPruebas.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                    } catch (IOException e) {
-                        System.err.println("No se pudo duplicar el Excel para pruebas: " + e.getMessage());
-                    }
-                }
-            }
-            if (!archivoPruebas.exists()) {
-                JOptionPane.showMessageDialog(parent,
-                        "No se encontró el archivo de inventario para modo pruebas.",
-                        "Inventario no disponible",
-                        JOptionPane.ERROR_MESSAGE);
-                return null;
-            }
-            return archivoPruebas;
-        }
-
         Preferences prefs = Preferences.userNodeForPackage(InventarioModelo.class);
         String rutaGuardada = prefs.get("RUTA_EXCEL_INVENTARIO", null);
         File archivoExcel = null;
@@ -454,6 +444,30 @@ public class InventarioModelo {
         return false;
     }
 
+    /**
+     * Verifica de forma silenciosa (sin mostrar diálogos ni pedir selección
+     * manual) si el archivo de inventario Excel está realmente disponible
+     * en este momento. Pensado para el indicador de conexión de la barra
+     * de estado, que debe reflejar la situación real del archivo y no un
+     * mensaje fijo. Usa la misma lógica robusta que obtenerArchivoExcel.
+     *
+     * @return el archivo si se pudo localizar y existe; null si no hay
+     *         ninguna base de datos de inventario accesible ahora mismo.
+     */
+    public File verificarConexionSilenciosa() {
+        Preferences prefs = Preferences.userNodeForPackage(InventarioModelo.class);
+        String rutaGuardada = prefs.get("RUTA_EXCEL_INVENTARIO", null);
+        if (rutaGuardada != null && !rutaGuardada.isBlank()) {
+            File archivo = new File(rutaGuardada);
+            if (archivo.exists() && archivo.isFile()) {
+                return archivo;
+            }
+        }
+
+        File encontrado = buscarInventarioAutomaticamente();
+        return (encontrado != null && encontrado.exists()) ? encontrado : null;
+    }
+
     public List<Producto> buscarEnExcel(String criterio, Component parent) {
         List<Producto> resultados = new ArrayList<>();
         if (criterio == null || criterio.isBlank()) {
@@ -629,10 +643,6 @@ public class InventarioModelo {
 
             if (hoyIncluido && !reporteHoyLeido && ventasHoyEnMemoria > 0) {
                 totalVentasRango += ventasHoyEnMemoria;
-            }
-
-            if (modoPruebas && totalVentasRango == 0.0) {
-                return 500000.00;
             }
 
         } catch (Exception e) {

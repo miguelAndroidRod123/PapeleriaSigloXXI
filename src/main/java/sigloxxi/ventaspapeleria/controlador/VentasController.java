@@ -31,7 +31,7 @@ public class VentasController {
     private final InventarioModelo modeloInventario;
     private final String nombreEmpleado;
 
-    private static final String VERSION_SOFTWARE = "v1.0.0";
+    private static final String VERSION_SOFTWARE = "v1.1.0";
     private static final String NOMBRE_ARCHIVO_SESION = "sesion_actual.recuperacion";
     private static final List<String> registroVentasDelDia = new ArrayList<>();
     private static double acumuladoTotalDia = 0.0;
