@@ -73,6 +73,7 @@ public class MainFrame extends JFrame {
     private JMenuItem itemActualizaciones;
     private JMenuItem itemReportes;
     private JMenuItem itemPagosEmpleados;
+    private JMenuItem itemControlAsistencia;
     private JMenuItem itemLimpiarConsola;
     private JMenuItem itemAcercaDe;
 
@@ -204,6 +205,12 @@ public class MainFrame extends JFrame {
                 20, 20,
                 "pago", "empleado", "nomina", "salario");
 
+        itemControlAsistencia = crearItemMenuConIcono(
+                "Control de Asistencia (Reloj Checador)",
+                "Marcar entrada, almuerzo y salida de los empleados",
+                20, 20,
+                "asistencia", "reloj", "entrada", "salida");
+
         itemActualizaciones = crearItemMenuConIcono(
                 "Buscar Actualizaciones",
                 "Verificar nuevas versiones del sistema",
@@ -212,6 +219,7 @@ public class MainFrame extends JFrame {
 
         menuOpciones.add(itemReportes);
         menuOpciones.add(itemPagosEmpleados);
+        menuOpciones.add(itemControlAsistencia);
         menuOpciones.addSeparator();
         menuOpciones.add(itemActualizaciones);
 
@@ -812,6 +820,10 @@ public class MainFrame extends JFrame {
                 nombreConocido = "ICONO-PAGO-EMPLEADO.png";
                 break;
             }
+            if (clave.equals("asistencia") || clave.equals("reloj") || clave.equals("checador")) {
+                nombreConocido = "ICONO-ASISTENCIA.png";
+                break;
+            }
             if (clave.equals("actualizar") || clave.equals("actualizacion") || clave.equals("actualizaciones") || clave.equals("update")) {
                 nombreConocido = "ICONO-ACTUALIZAR.png";
                 break;
@@ -937,6 +949,7 @@ public class MainFrame extends JFrame {
     public JMenuItem getItemActualizaciones() { return itemActualizaciones; }
     public JMenuItem getItemReportes() { return itemReportes; }
     public JMenuItem getItemPagosEmpleados() { return itemPagosEmpleados; }
+    public JMenuItem getItemControlAsistencia() { return itemControlAsistencia; }
     public JTable getTablaVentas() { return tablaVentas; }
     public DefaultTableModel getModeloTabla() { return modeloTabla; }
     public JLabel getLblTotal() { return lblTotal; }
@@ -1216,6 +1229,8 @@ public class MainFrame extends JFrame {
         private final JLabel lblTextoFechaEvaluacion;
         private final JLabel lblVentasTotales;
         private final JTextField txtPorcentajeComision;
+        private final JTextField txtTarifaHora;
+        private final JLabel lblHorasTrabajadas;
         private final JTextField txtMontoPagar;
         private final JLabel lblTotalPagadoHoy;
         private final JButton btnRegistrarPago;
@@ -1229,7 +1244,7 @@ public class MainFrame extends JFrame {
 
         public DialogoPagoEmpleados(Window padre, String[] empleados, String empleadoActual) {
             super(padre, "Centro de Pagos y Liquidación a Empleados", ModalityType.APPLICATION_MODAL);
-            setSize(500, 470);
+            setSize(500, 560);
             setLocationRelativeTo(padre);
             setLayout(new BorderLayout(10, 10));
             setResizable(false);
@@ -1237,7 +1252,7 @@ public class MainFrame extends JFrame {
             this.inicioRango = LocalDate.now();
             this.finRango = LocalDate.now();
 
-            JPanel panelForm = new JPanel(new GridLayout(9, 2, 10, 10));
+            JPanel panelForm = new JPanel(new GridLayout(11, 2, 10, 10));
             panelForm.setBorder(BorderFactory.createEmptyBorder(20, 20, 10, 20));
             panelForm.setBackground(COLOR_FONDO);
 
@@ -1284,6 +1299,18 @@ public class MainFrame extends JFrame {
             txtPorcentajeComision = new JTextField("5.0");
             txtPorcentajeComision.setFont(FUENTE_TEXTO);
             panelForm.add(txtPorcentajeComision);
+
+            panelForm.add(new JLabel("Tarifa por Hora ($):"));
+            txtTarifaHora = new JTextField("0");
+            txtTarifaHora.setFont(FUENTE_TEXTO);
+            txtTarifaHora.setToolTipText("Se multiplica por las horas reales marcadas en el Reloj Checador para ese período");
+            panelForm.add(txtTarifaHora);
+
+            panelForm.add(new JLabel("Horas Trabajadas (Reloj):"));
+            lblHorasTrabajadas = new JLabel("0.0 h");
+            lblHorasTrabajadas.setFont(FUENTE_TEXTO_BOLD);
+            lblHorasTrabajadas.setForeground(COLOR_OSCURO);
+            panelForm.add(lblHorasTrabajadas);
 
             panelForm.add(new JLabel("Monto Final a Pagar ($):"));
             txtMontoPagar = new JTextField("0.00");
@@ -1347,6 +1374,8 @@ public class MainFrame extends JFrame {
         public JButton getBtnAbrirSelectorFecha() { return btnAbrirSelectorFecha; }
         public JLabel getLblVentasTotales() { return lblVentasTotales; }
         public JTextField getTxtPorcentajeComision() { return txtPorcentajeComision; }
+        public JTextField getTxtTarifaHora() { return txtTarifaHora; }
+        public JLabel getLblHorasTrabajadas() { return lblHorasTrabajadas; }
         public JTextField getTxtMontoPagar() { return txtMontoPagar; }
         public JLabel getLblTotalPagadoHoy() { return lblTotalPagadoHoy; }
         public JButton getBtnRegistrarPago() { return btnRegistrarPago; }
@@ -1362,6 +1391,115 @@ public class MainFrame extends JFrame {
                 setRangoEvaluacion(ld, ld);
             }
         }
+    }
+
+    // =========================================================================
+    // DIÁLOGO: CONTROL DE ASISTENCIA (RELOJ CHECADOR CON ALMUERZO)
+    // =========================================================================
+    public class DialogoAsistencia extends JDialog {
+        private final JComboBox<String> comboEmpleado;
+        private final JLabel lblEntrada;
+        private final JLabel lblInicioAlmuerzo;
+        private final JLabel lblFinAlmuerzo;
+        private final JLabel lblSalida;
+        private final JLabel lblHorasHoy;
+        private final JButton btnMarcarEntrada;
+        private final JButton btnIniciarAlmuerzo;
+        private final JButton btnTerminarAlmuerzo;
+        private final JButton btnMarcarSalida;
+
+        public DialogoAsistencia(Window padre, String[] empleados, String empleadoActual) {
+            super(padre, "Control de Asistencia - Reloj Checador", ModalityType.APPLICATION_MODAL);
+            setSize(460, 420);
+            setLocationRelativeTo(padre);
+            setLayout(new BorderLayout(10, 10));
+            setResizable(false);
+
+            JPanel panelSuperior = new JPanel(new BorderLayout(8, 8));
+            panelSuperior.setBorder(BorderFactory.createEmptyBorder(18, 20, 0, 20));
+            panelSuperior.setBackground(COLOR_FONDO);
+
+            JPanel panelEmpleado = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+            panelEmpleado.setOpaque(false);
+            panelEmpleado.add(new JLabel("Empleado:"));
+            comboEmpleado = new JComboBox<>(empleados != null && empleados.length > 0 ? empleados : new String[]{"SIN ASIGNAR"});
+            comboEmpleado.setFont(FUENTE_TEXTO);
+            if (empleadoActual != null) comboEmpleado.setSelectedItem(empleadoActual);
+            panelEmpleado.add(comboEmpleado);
+            panelSuperior.add(panelEmpleado, BorderLayout.NORTH);
+
+            JPanel panelEstado = new JPanel(new GridLayout(5, 2, 8, 6));
+            panelEstado.setOpaque(false);
+            panelEstado.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
+
+            panelEstado.add(new JLabel("Entrada:"));
+            lblEntrada = new JLabel("--:--:--");
+            lblEntrada.setFont(FUENTE_TEXTO_BOLD);
+            panelEstado.add(lblEntrada);
+
+            panelEstado.add(new JLabel("Inicio Almuerzo:"));
+            lblInicioAlmuerzo = new JLabel("--:--:--");
+            lblInicioAlmuerzo.setFont(FUENTE_TEXTO_BOLD);
+            panelEstado.add(lblInicioAlmuerzo);
+
+            panelEstado.add(new JLabel("Fin Almuerzo:"));
+            lblFinAlmuerzo = new JLabel("--:--:--");
+            lblFinAlmuerzo.setFont(FUENTE_TEXTO_BOLD);
+            panelEstado.add(lblFinAlmuerzo);
+
+            panelEstado.add(new JLabel("Salida:"));
+            lblSalida = new JLabel("--:--:--");
+            lblSalida.setFont(FUENTE_TEXTO_BOLD);
+            panelEstado.add(lblSalida);
+
+            panelEstado.add(new JLabel("Horas trabajadas hoy:"));
+            lblHorasHoy = new JLabel("0.0 h");
+            lblHorasHoy.setFont(FUENTE_SUBTITULO);
+            lblHorasHoy.setForeground(COLOR_PRIMARIO);
+            panelEstado.add(lblHorasHoy);
+
+            panelSuperior.add(panelEstado, BorderLayout.CENTER);
+            add(panelSuperior, BorderLayout.NORTH);
+
+            JPanel panelBotones = new JPanel(new GridLayout(2, 2, 10, 10));
+            panelBotones.setBorder(BorderFactory.createEmptyBorder(0, 20, 20, 20));
+            panelBotones.setBackground(COLOR_FONDO);
+
+            btnMarcarEntrada = crearBotonEstilizado("Marcar Entrada", COLOR_EXITO, Color.WHITE);
+            btnIniciarAlmuerzo = crearBotonEstilizado("Iniciar Almuerzo", new Color(230, 160, 30), Color.WHITE);
+            btnTerminarAlmuerzo = crearBotonEstilizado("Terminar Almuerzo", new Color(230, 160, 30), Color.WHITE);
+            btnMarcarSalida = crearBotonEstilizado("Marcar Salida", COLOR_PELIGRO, Color.WHITE);
+
+            configurarIconoBoton(btnMarcarEntrada, "ICONO-ENTRADA-TURNO.png", 18, 18);
+            configurarIconoBoton(btnIniciarAlmuerzo, "ICONO-ALMUERZO.png", 18, 18);
+            configurarIconoBoton(btnTerminarAlmuerzo, "ICONO-ALMUERZO.png", 18, 18);
+            configurarIconoBoton(btnMarcarSalida, "ICONO-SALIDA-TURNO.png", 18, 18);
+
+            panelBotones.add(btnMarcarEntrada);
+            panelBotones.add(btnIniciarAlmuerzo);
+            panelBotones.add(btnTerminarAlmuerzo);
+            panelBotones.add(btnMarcarSalida);
+
+            add(panelBotones, BorderLayout.CENTER);
+
+            JButton btnCerrar = new JButton("Cerrar");
+            JPanel panelFooter = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 10));
+            panelFooter.setBackground(COLOR_FONDO);
+            panelFooter.add(btnCerrar);
+            add(panelFooter, BorderLayout.SOUTH);
+            btnCerrar.addActionListener(e -> dispose());
+        }
+
+        public JComboBox<String> getComboEmpleado() { return comboEmpleado; }
+        public JLabel getLblEntrada() { return lblEntrada; }
+        public JLabel getLblInicioAlmuerzo() { return lblInicioAlmuerzo; }
+        public JLabel getLblFinAlmuerzo() { return lblFinAlmuerzo; }
+        public JLabel getLblSalida() { return lblSalida; }
+        public JLabel getLblHorasHoy() { return lblHorasHoy; }
+        public JButton getBtnMarcarEntrada() { return btnMarcarEntrada; }
+        public JButton getBtnIniciarAlmuerzo() { return btnIniciarAlmuerzo; }
+        public JButton getBtnTerminarAlmuerzo() { return btnTerminarAlmuerzo; }
+        public JButton getBtnMarcarSalida() { return btnMarcarSalida; }
     }
 
     // =========================================================================

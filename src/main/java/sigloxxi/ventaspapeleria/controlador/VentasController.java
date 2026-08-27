@@ -7,10 +7,13 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.filechooser.FileSystemView;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.print.PageFormat;
+import java.awt.print.Paper;
+import java.awt.print.Printable;
 import java.awt.print.PrinterException;
+import java.awt.print.PrinterJob;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.text.MessageFormat;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -21,6 +24,7 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.prefs.Preferences;
+import sigloxxi.ventaspapeleria.modelo.AsistenciaModelo;
 import sigloxxi.ventaspapeleria.modelo.InventarioModelo;
 import sigloxxi.ventaspapeleria.modelo.Producto;
 import sigloxxi.ventaspapeleria.vista.MainFrame;
@@ -44,6 +48,7 @@ public class VentasController {
     private static int contadorFacturas = 1;
 
     private double totalGeneral = 0.0;
+    private final AsistenciaModelo asistenciaModelo = new AsistenciaModelo();
     private javax.swing.Timer timerMonitorInventario;
 
     public VentasController(MainFrame vista, InventarioModelo modeloInventario, String nombreEmpleado) {
@@ -295,6 +300,7 @@ public class VentasController {
         vista.getItemActualizaciones().addActionListener(e -> abrirCentroActualizaciones());
         vista.getItemReportes().addActionListener(e -> abrirCentroReportes());
         vista.getItemPagosEmpleados().addActionListener(e -> abrirCentroPagosEmpleados());
+        vista.getItemControlAsistencia().addActionListener(e -> abrirControlAsistencia());
     }
 
     private void validarProducto() {
@@ -929,7 +935,7 @@ public class VentasController {
         );
 
         if (opcionImprimir == JOptionPane.YES_OPTION) {
-            imprimirFacturaVenta(contadorFacturas, ticket.toString());
+            mostrarVistaPreviaImpresion(contadorFacturas, ticket.toString());
         }
 
         contadorFacturas++;
@@ -939,23 +945,197 @@ public class VentasController {
         guardarSesionActual();
     }
 
-    private void imprimirFacturaVenta(int numFactura, String contenidoTicket) {
-        try {
-            JTextArea areaImpresion = new JTextArea(contenidoTicket);
-            areaImpresion.setFont(new Font("Monospaced", Font.PLAIN, 9));
+    private static final String PREF_ANCHO_PAPEL_MM = "ANCHO_PAPEL_TICKET_MM";
 
-            boolean impreso = areaImpresion.print(
-                    new MessageFormat("PAPELERÍA SIGLO XXI - TICKET #" + String.format("%06d", numFactura)),
-                    new MessageFormat("Página {0}"),
-                    true,
-                    null,
-                    null,
-                    true
-            );
+    /**
+     * Muestra una vista previa del comprobante ANTES de imprimir, simulando
+     * el ancho físico real del rollo de papel térmico (58 u 80 mm). Así se
+     * puede detectar si algo se va a cortar sin gastar papel. El botón
+     * "Imprimir" de esta ventana usa exactamente el mismo cálculo de fuente
+     * que la vista previa, así que lo que se ve aquí es lo que sale impreso.
+     */
+    private void mostrarVistaPreviaImpresion(int numFactura, String contenidoTicket) {
+        String[] lineas = contenidoTicket.split("\n", -1);
 
-            if (impreso) {
-                JOptionPane.showMessageDialog(vista, "Comprobante #" + String.format("%06d", numFactura) + " enviado a la impresora.", "Impresión Exitosa", JOptionPane.INFORMATION_MESSAGE);
+        Preferences prefs = Preferences.userNodeForPackage(VentasController.class);
+        int anchoGuardadoMM = prefs.getInt(PREF_ANCHO_PAPEL_MM, 80);
+
+        JDialog dialogo = new JDialog(vista, "Vista Previa de Impresión - Ticket #" + String.format("%06d", numFactura), true);
+        dialogo.setLayout(new BorderLayout(10, 10));
+
+        JPanel panelSuperior = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
+        panelSuperior.add(new JLabel("Ancho del rollo de papel:"));
+        JComboBox<String> comboAncho = new JComboBox<>(new String[]{"58 mm (angosto)", "80 mm (estándar)"});
+        comboAncho.setSelectedIndex(anchoGuardadoMM <= 58 ? 0 : 1);
+        panelSuperior.add(comboAncho);
+        JLabel lblAviso = new JLabel("La vista es una aproximación; el resultado exacto depende del controlador de la impresora.");
+        lblAviso.setFont(lblAviso.getFont().deriveFont(Font.ITALIC, 11f));
+        lblAviso.setForeground(Color.GRAY);
+        panelSuperior.add(lblAviso);
+        dialogo.add(panelSuperior, BorderLayout.NORTH);
+
+        PanelVistaPreviaTicket panelTicket = new PanelVistaPreviaTicket(lineas, anchoGuardadoMM);
+        JPanel panelFondo = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        panelFondo.setBackground(new Color(60, 63, 65));
+        panelFondo.add(panelTicket);
+        JScrollPane scroll = new JScrollPane(panelFondo);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setPreferredSize(new Dimension(420, 520));
+        dialogo.add(scroll, BorderLayout.CENTER);
+
+        comboAncho.addActionListener(e -> {
+            int nuevoAncho = comboAncho.getSelectedIndex() == 0 ? 58 : 80;
+            panelTicket.setAnchoPapelMM(nuevoAncho);
+            dialogo.revalidate();
+            dialogo.repaint();
+        });
+
+        JPanel panelBotones = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 8));
+        JButton btnCancelar = new JButton("Cancelar");
+        JButton btnImprimir = new JButton("🖨 Imprimir");
+        btnImprimir.setBackground(new Color(39, 174, 96));
+        btnImprimir.setForeground(Color.WHITE);
+        panelBotones.add(btnCancelar);
+        panelBotones.add(btnImprimir);
+        dialogo.add(panelBotones, BorderLayout.SOUTH);
+
+        btnCancelar.addActionListener(e -> dialogo.dispose());
+        btnImprimir.addActionListener(e -> {
+            int anchoElegidoMM = comboAncho.getSelectedIndex() == 0 ? 58 : 80;
+            prefs.putInt(PREF_ANCHO_PAPEL_MM, anchoElegidoMM);
+            dialogo.dispose();
+            imprimirFacturaVenta(numFactura, lineas, anchoElegidoMM);
+        });
+
+        dialogo.pack();
+        dialogo.setLocationRelativeTo(vista);
+        dialogo.setVisible(true);
+    }
+
+    /**
+     * Panel que dibuja el ticket a escala, simulando el ancho físico real
+     * del papel (convertido de mm a píxeles a 96 DPI) para que la vista
+     * previa se parezca lo más posible al resultado impreso real.
+     */
+    private static class PanelVistaPreviaTicket extends JPanel {
+        private String[] lineas;
+        private int anchoPapelMM;
+        private static final double PX_POR_MM = 96.0 / 25.4;
+
+        PanelVistaPreviaTicket(String[] lineas, int anchoPapelMM) {
+            this.lineas = lineas;
+            this.anchoPapelMM = anchoPapelMM;
+            setBackground(Color.WHITE);
+            setBorder(BorderFactory.createLineBorder(new Color(180, 180, 180)));
+            actualizarTamano();
+        }
+
+        void setAnchoPapelMM(int anchoPapelMM) {
+            this.anchoPapelMM = anchoPapelMM;
+            actualizarTamano();
+        }
+
+        private void actualizarTamano() {
+            int anchoPx = (int) Math.round(anchoPapelMM * PX_POR_MM);
+            int altoPx = 24 + lineas.length * 14;
+            Dimension tam = new Dimension(anchoPx, altoPx);
+            setPreferredSize(tam);
+            setMinimumSize(tam);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setColor(Color.BLACK);
+
+            int margenPx = (int) Math.round(2 * PX_POR_MM);
+            int anchoDisponiblePx = getWidth() - (margenPx * 2);
+
+            Font fuente = calcularFuenteAjustada(g2, lineas, anchoDisponiblePx);
+            g2.setFont(fuente);
+            FontMetrics fm = g2.getFontMetrics();
+            int alturaLinea = fm.getHeight();
+
+            int y = margenPx + fm.getAscent();
+            for (String linea : lineas) {
+                g2.drawString(linea, margenPx, y);
+                y += alturaLinea;
             }
+            g2.dispose();
+        }
+    }
+
+    /**
+     * Calcula el tamaño de fuente monoespaciada más grande que permite que
+     * la línea más ancha del ticket quepa dentro del ancho disponible. Esta
+     * misma función se usa para la vista previa y para la impresión real,
+     * así se garantiza que nunca se corte el contenido.
+     */
+    private static Font calcularFuenteAjustada(Graphics2D g2, String[] lineas, double anchoDisponiblePx) {
+        int tamano = 11;
+        Font fuente;
+        while (tamano > 4) {
+            fuente = new Font("Monospaced", Font.PLAIN, tamano);
+            FontMetrics fm = g2.getFontMetrics(fuente);
+            int maxAncho = 0;
+            for (String linea : lineas) {
+                maxAncho = Math.max(maxAncho, fm.stringWidth(linea));
+            }
+            if (maxAncho <= anchoDisponiblePx) {
+                return fuente;
+            }
+            tamano--;
+        }
+        return new Font("Monospaced", Font.PLAIN, 4);
+    }
+
+    /**
+     * Imprime el comprobante usando un tamaño de página propio, del ancho
+     * físico real del rollo (58 u 80 mm) en vez del tamaño Carta/A4 por
+     * defecto del controlador. Esto es lo que corrige que el ticket saliera
+     * cortado: antes se imprimía asumiendo una hoja de oficina normal,
+     * mucho más ancha que el papel térmico real de la impresora POS.
+     */
+    private void imprimirFacturaVenta(int numFactura, String[] lineas, int anchoPapelMM) {
+        try {
+            PrinterJob job = PrinterJob.getPrinterJob();
+            job.setJobName("Ticket #" + String.format("%06d", numFactura));
+
+            double anchoPt = anchoPapelMM * (72.0 / 25.4);
+            double margenPt = 2 * (72.0 / 25.4);
+            double altoPt = 3000; // suficientemente alto: el rollo es continuo, no de tamaño fijo
+
+            Paper papel = new Paper();
+            papel.setSize(anchoPt, altoPt);
+            papel.setImageableArea(margenPt, margenPt, anchoPt - (margenPt * 2), altoPt - (margenPt * 2));
+
+            PageFormat formato = new PageFormat();
+            formato.setPaper(papel);
+
+            job.setPrintable((Graphics g, PageFormat pf, int pageIndex) -> {
+                if (pageIndex > 0) {
+                    return Printable.NO_SUCH_PAGE;
+                }
+                Graphics2D g2 = (Graphics2D) g;
+                g2.translate(pf.getImageableX(), pf.getImageableY());
+
+                Font fuente = calcularFuenteAjustada(g2, lineas, pf.getImageableWidth());
+                g2.setFont(fuente);
+                FontMetrics fm = g2.getFontMetrics();
+                int alturaLinea = fm.getHeight();
+
+                int y = fm.getAscent();
+                for (String linea : lineas) {
+                    g2.drawString(linea, 0, y);
+                    y += alturaLinea;
+                }
+                return Printable.PAGE_EXISTS;
+            }, formato);
+
+            job.print();
+
+            JOptionPane.showMessageDialog(vista, "Comprobante #" + String.format("%06d", numFactura) + " enviado a la impresora.", "Impresión Exitosa", JOptionPane.INFORMATION_MESSAGE);
         } catch (PrinterException ex) {
             JOptionPane.showMessageDialog(vista, "Error al intentar imprimir el comprobante: " + ex.getMessage(), "Error de Impresión", JOptionPane.ERROR_MESSAGE);
         }
@@ -980,6 +1160,77 @@ public class VentasController {
                 null,
                 opciones,
                 opciones[0]);
+    }
+
+    /**
+     * Reloj checador: permite marcar Entrada, Inicio/Fin de Almuerzo y
+     * Salida del empleado seleccionado. Estos registros son los que luego
+     * usa el Centro de Pagos para calcular las horas reales trabajadas.
+     */
+    private void abrirControlAsistencia() {
+        MainFrame.DialogoAsistencia dialogo = vista.new DialogoAsistencia(
+                vista, new String[]{this.nombreEmpleado, "Admin", "Auxiliar"}, this.nombreEmpleado);
+
+        DateTimeFormatter fmtHora = DateTimeFormatter.ofPattern("HH:mm:ss");
+
+        Runnable refrescarEstado = () -> {
+            String empleadoSel = (String) dialogo.getComboEmpleado().getSelectedItem();
+            AsistenciaModelo.RegistroAsistencia r = asistenciaModelo.obtenerEstadoHoy(empleadoSel);
+
+            dialogo.getLblEntrada().setText(r.horaEntrada == null ? "--:--:--" : r.horaEntrada.format(fmtHora));
+            dialogo.getLblInicioAlmuerzo().setText(r.horaInicioAlmuerzo == null ? "--:--:--" : r.horaInicioAlmuerzo.format(fmtHora));
+            dialogo.getLblFinAlmuerzo().setText(r.horaFinAlmuerzo == null ? "--:--:--" : r.horaFinAlmuerzo.format(fmtHora));
+            dialogo.getLblSalida().setText(r.horaSalida == null ? "--:--:--" : r.horaSalida.format(fmtHora));
+            dialogo.getLblHorasHoy().setText(String.format("%.1f h", r.calcularHoras()));
+
+            dialogo.getBtnMarcarEntrada().setEnabled(r.horaEntrada == null);
+            dialogo.getBtnIniciarAlmuerzo().setEnabled(r.horaEntrada != null && r.horaInicioAlmuerzo == null && r.horaSalida == null);
+            dialogo.getBtnTerminarAlmuerzo().setEnabled(r.horaInicioAlmuerzo != null && r.horaFinAlmuerzo == null);
+            dialogo.getBtnMarcarSalida().setEnabled(r.horaEntrada != null && r.horaSalida == null);
+        };
+
+        refrescarEstado.run();
+        dialogo.getComboEmpleado().addActionListener(e -> refrescarEstado.run());
+
+        dialogo.getBtnMarcarEntrada().addActionListener(e -> {
+            String empleadoSel = (String) dialogo.getComboEmpleado().getSelectedItem();
+            String error = asistenciaModelo.marcarEntrada(empleadoSel);
+            if (error != null) {
+                JOptionPane.showMessageDialog(dialogo, error, "Aviso", JOptionPane.WARNING_MESSAGE);
+            }
+            refrescarEstado.run();
+        });
+
+        dialogo.getBtnIniciarAlmuerzo().addActionListener(e -> {
+            String empleadoSel = (String) dialogo.getComboEmpleado().getSelectedItem();
+            String error = asistenciaModelo.marcarInicioAlmuerzo(empleadoSel);
+            if (error != null) {
+                JOptionPane.showMessageDialog(dialogo, error, "Aviso", JOptionPane.WARNING_MESSAGE);
+            }
+            refrescarEstado.run();
+        });
+
+        dialogo.getBtnTerminarAlmuerzo().addActionListener(e -> {
+            String empleadoSel = (String) dialogo.getComboEmpleado().getSelectedItem();
+            String error = asistenciaModelo.marcarFinAlmuerzo(empleadoSel);
+            if (error != null) {
+                JOptionPane.showMessageDialog(dialogo, error, "Aviso", JOptionPane.WARNING_MESSAGE);
+            }
+            refrescarEstado.run();
+        });
+
+        dialogo.getBtnMarcarSalida().addActionListener(e -> {
+            String empleadoSel = (String) dialogo.getComboEmpleado().getSelectedItem();
+            String error = asistenciaModelo.marcarSalida(empleadoSel);
+            if (error != null) {
+                JOptionPane.showMessageDialog(dialogo, error, "Aviso", JOptionPane.WARNING_MESSAGE);
+            } else {
+                JOptionPane.showMessageDialog(dialogo, "Salida registrada. ¡Buen trabajo hoy!", "Asistencia", JOptionPane.INFORMATION_MESSAGE);
+            }
+            refrescarEstado.run();
+        });
+
+        dialogo.setVisible(true);
     }
 
     private void abrirCentroPagosEmpleados() {
@@ -1044,13 +1295,25 @@ public class VentasController {
                 double ventasBase = modeloInventario.calcularVentasPorRangoFechas(inicioPeriodo, finPeriodo, acumuladoTotalDia);
                 dialogoPagos.getLblVentasTotales().setText(String.format("$%.2f", ventasBase));
 
+                String empleadoSel = (String) dialogoPagos.getComboEmpleado().getSelectedItem();
+                double horasTrabajadas = asistenciaModelo.calcularHorasTrabajadas(empleadoSel, inicioPeriodo, finPeriodo);
+                dialogoPagos.getLblHorasTrabajadas().setText(String.format("%.1f h", horasTrabajadas));
+
                 double porcentaje = 0.0;
                 String pctText = dialogoPagos.getTxtPorcentajeComision().getText().trim().replace(",", ".");
                 if (!pctText.isEmpty()) {
                     porcentaje = Double.parseDouble(pctText);
                 }
 
-                double montoPagar = ventasBase * (porcentaje / 100.0);
+                double tarifaHora = 0.0;
+                String tarifaText = dialogoPagos.getTxtTarifaHora().getText().trim().replace(",", ".");
+                if (!tarifaText.isEmpty()) {
+                    tarifaHora = Double.parseDouble(tarifaText);
+                }
+
+                double sueldoPorHoras = horasTrabajadas * tarifaHora;
+                double comisionVentas = ventasBase * (porcentaje / 100.0);
+                double montoPagar = sueldoPorHoras + comisionVentas;
                 dialogoPagos.getTxtMontoPagar().setText(String.format("%.2f", montoPagar));
 
             } catch (Exception ignored) {
@@ -1062,6 +1325,12 @@ public class VentasController {
 
         dialogoPagos.getSpinnerFecha().addChangeListener(e -> calcularAutomatico.run());
         dialogoPagos.getComboConcepto().addActionListener(e -> calcularAutomatico.run());
+        dialogoPagos.getComboEmpleado().addActionListener(e -> calcularAutomatico.run());
+        dialogoPagos.getTxtTarifaHora().getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { calcularAutomatico.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { calcularAutomatico.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { calcularAutomatico.run(); }
+        });
 
         dialogoPagos.getBtnAbrirSelectorFecha().addActionListener(e -> {
             Date fechaActual = dialogoPagos.getFechaSeleccionada();
