@@ -12,6 +12,11 @@ import java.awt.print.Paper;
 import java.awt.print.Printable;
 import java.awt.print.PrinterException;
 import java.awt.print.PrinterJob;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
@@ -35,7 +40,8 @@ public class VentasController {
     private final InventarioModelo modeloInventario;
     private final String nombreEmpleado;
 
-    private static final String VERSION_SOFTWARE = "v1.1.0";
+    private static final String VERSION_SOFTWARE = "v1.2.0";
+    private static final String URL_INFO_VERSION = "https://raw.githubusercontent.com/miguelAndroidRod123/PapeleriaSigloXXI/main/version.txt";
     private static final String NOMBRE_ARCHIVO_SESION = "sesion_actual.recuperacion";
     private static final List<String> registroVentasDelDia = new ArrayList<>();
     private static double acumuladoTotalDia = 0.0;
@@ -393,6 +399,11 @@ public class VentasController {
         boolean esImpresion3DPedido = "impresión 3d pedido".equalsIgnoreCase(
                 producto.getNombre() == null ? "" : producto.getNombre().trim());
 
+        String nombreProductoLimpio = producto.getNombre() == null ? "" : producto.getNombre().trim();
+        boolean esPagoFacturas = "pagos de facturas".equalsIgnoreCase(nombreProductoLimpio);
+        boolean esNequiMas100 = "retiros / recargas nequi +100".equalsIgnoreCase(nombreProductoLimpio);
+        boolean esNequiMenos100 = "retiros / recargas nequi -100".equalsIgnoreCase(nombreProductoLimpio);
+
         if (esImpresion3DPedido) {
             CotizacionImpresion3D cotizacion = mostrarDialogoCostoImpresion3D(
                     producto.getNombre(), producto.getPrecio(), cantidad);
@@ -423,6 +434,47 @@ public class VentasController {
                     cotizacion.envioTotal,
                     cantidad,
                     cotizacion.totalCliente
+            ));
+
+        } else if (esPagoFacturas || esNequiMas100 || esNequiMenos100) {
+            String tituloDialogo;
+            String etiquetaValorBase;
+            if (esPagoFacturas) {
+                tituloDialogo = "Cotización - Pago de Factura";
+                etiquetaValorBase = "Valor de la factura pagada ($):";
+            } else if (esNequiMas100) {
+                tituloDialogo = "Cotización - Recarga Nequi";
+                etiquetaValorBase = "Monto a recargar en Nequi ($):";
+            } else {
+                tituloDialogo = "Cotización - Retiro Nequi";
+                etiquetaValorBase = "Monto a retirar de Nequi ($):";
+            }
+
+            CotizacionServicioBase cotizacion = mostrarDialogoServicioConValorBase(
+                    tituloDialogo, producto.getNombre(), etiquetaValorBase, producto.getPrecio());
+
+            if (cotizacion == null) {
+                // El usuario canceló: no se agrega nada al carrito.
+                return;
+            }
+
+            // Cada pago/retiro/recarga es una transacción única: se agrega
+            // siempre como una fila nueva con cantidad 1, sin importar lo que
+            // se haya escrito en el campo "Cantidad" de la búsqueda.
+            vista.getModeloTabla().addRow(new Object[]{
+                producto.getCodigo(),
+                producto.getNombre(),
+                1,
+                String.format("%.2f", cotizacion.totalCliente),
+                String.format("%.2f", cotizacion.totalCliente),
+                String.format("%.2f", producto.getCostoMayorista())
+            });
+
+            totalGeneral += cotizacion.totalCliente;
+
+            vista.agregarLogConsola(String.format(
+                    "%s | Valor base: $%.2f | Comisión: $%.2f | Total cliente: $%.2f",
+                    producto.getNombre(), cotizacion.valorBase, cotizacion.comision, cotizacion.totalCliente
             ));
 
         } else {
@@ -706,6 +758,166 @@ public class VentasController {
             }
         });
 
+        dialogo.setVisible(true);
+        return resultado[0];
+    }
+
+    /**
+     * Resultado de una cotización simple de "valor base + comisión fija".
+     * Usado por Pagos de Facturas y Retiros/Recargas Nequi.
+     */
+    private static class CotizacionServicioBase {
+        final double valorBase;
+        final double comision;
+        final double totalCliente;
+
+        CotizacionServicioBase(double valorBase, double comision, double totalCliente) {
+            this.valorBase = valorBase;
+            this.comision = comision;
+            this.totalCliente = totalCliente;
+        }
+    }
+
+    /**
+     * Diálogo genérico para servicios donde el cajero digita un valor base
+     * distinto cada vez (el valor de una factura, o el monto de una
+     * transacción Nequi) y el sistema le suma la comisión fija configurada
+     * como Precio Unitario en el Excel para ese producto.
+     *
+     * Total al cliente = valor base digitado + comisión del Excel.
+     */
+    private CotizacionServicioBase mostrarDialogoServicioConValorBase(
+            String tituloDialogo, String nombreProducto, String etiquetaValorBase, double comision) {
+
+        final JDialog dialogo = new JDialog(vista, tituloDialogo, Dialog.ModalityType.APPLICATION_MODAL);
+        dialogo.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        dialogo.setSize(440, 330);
+        dialogo.setLocationRelativeTo(vista);
+        dialogo.setResizable(false);
+
+        JPanel panelPrincipal = new JPanel(new BorderLayout(10, 10));
+        panelPrincipal.setBorder(BorderFactory.createEmptyBorder(15, 18, 12, 18));
+        panelPrincipal.setBackground(Color.WHITE);
+
+        JPanel panelForm = new JPanel(new GridBagLayout());
+        panelForm.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+
+        JLabel lblTitulo = new JLabel(tituloDialogo.replace("Cotización - ", ""));
+        lblTitulo.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        lblTitulo.setForeground(MainFrame.COLOR_OSCURO);
+
+        JLabel lblProducto = new JLabel("Producto: " + nombreProducto);
+        lblProducto.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+
+        JLabel lblComision = new JLabel(String.format("Comisión por servicio (Precio Unitario Excel): $%,.2f", comision));
+        lblComision.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        lblComision.setForeground(MainFrame.COLOR_PRIMARIO_DARK);
+
+        JTextField txtValorBase = new JTextField();
+        txtValorBase.setFont(new Font("Segoe UI", Font.BOLD, 14));
+
+        JLabel lblResultado = new JLabel("TOTAL AL CLIENTE: $0,00");
+        lblResultado.setFont(new Font("Segoe UI", Font.BOLD, 17));
+        lblResultado.setForeground(MainFrame.COLOR_EXITO);
+
+        JLabel lblDetalle = new JLabel(" ");
+        lblDetalle.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        lblDetalle.setForeground(MainFrame.COLOR_OSCURO);
+
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        panelForm.add(lblTitulo, gbc);
+        gbc.gridy++;
+        panelForm.add(lblProducto, gbc);
+        gbc.gridy++;
+        panelForm.add(lblComision, gbc);
+
+        gbc.gridwidth = 1;
+        gbc.gridy++;
+        gbc.gridx = 0;
+        panelForm.add(new JLabel(etiquetaValorBase), gbc);
+        gbc.gridx = 1;
+        panelForm.add(txtValorBase, gbc);
+
+        gbc.gridy++;
+        gbc.gridx = 0; gbc.gridwidth = 2;
+        panelForm.add(lblDetalle, gbc);
+        gbc.gridy++;
+        panelForm.add(lblResultado, gbc);
+
+        JPanel panelAcciones = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 4));
+        panelAcciones.setOpaque(false);
+
+        JButton btnCancelar = new JButton("Cancelar");
+        JButton btnAceptar = new JButton("Aceptar");
+        btnAceptar.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btnAceptar.setBackground(MainFrame.COLOR_EXITO);
+        btnAceptar.setForeground(Color.WHITE);
+        btnAceptar.setFocusPainted(false);
+
+        panelAcciones.add(btnCancelar);
+        panelAcciones.add(btnAceptar);
+
+        panelPrincipal.add(panelForm, BorderLayout.CENTER);
+        panelPrincipal.add(panelAcciones, BorderLayout.SOUTH);
+        dialogo.setContentPane(panelPrincipal);
+
+        final CotizacionServicioBase[] resultado = new CotizacionServicioBase[1];
+
+        Runnable recalcular = () -> {
+            try {
+                double valorBase = parsearMontoFlexible(txtValorBase.getText());
+                if (valorBase < 0) throw new NumberFormatException();
+
+                double total = valorBase + comision;
+                lblDetalle.setText(String.format("Valor base: $%,.2f  +  Comisión: $%,.2f  =  $%,.2f",
+                        valorBase, comision, total));
+                lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.2f", total));
+                lblResultado.setForeground(MainFrame.COLOR_EXITO);
+            } catch (Exception ex) {
+                lblDetalle.setText("Ingrese un valor base válido.");
+                lblResultado.setText("TOTAL AL CLIENTE: $0,00");
+                lblResultado.setForeground(MainFrame.COLOR_PELIGRO);
+            }
+        };
+
+        DocumentListener recalculoListener = new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { recalcular.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { recalcular.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { recalcular.run(); }
+        };
+        txtValorBase.getDocument().addDocumentListener(recalculoListener);
+
+        btnCancelar.addActionListener(e -> dialogo.dispose());
+
+        btnAceptar.addActionListener(e -> {
+            try {
+                double valorBase = parsearMontoFlexible(txtValorBase.getText());
+                if (valorBase < 0) throw new NumberFormatException();
+
+                double total = valorBase + comision;
+                resultado[0] = new CotizacionServicioBase(valorBase, comision, total);
+                dialogo.dispose();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialogo,
+                        "Ingrese un valor numérico válido.",
+                        "Datos inválidos",
+                        JOptionPane.WARNING_MESSAGE);
+                txtValorBase.requestFocus();
+            }
+        });
+
+        dialogo.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowOpened(java.awt.event.WindowEvent e) {
+                txtValorBase.requestFocus();
+            }
+        });
+
+        recalcular.run();
         dialogo.setVisible(true);
         return resultado[0];
     }
@@ -1181,7 +1393,13 @@ public class VentasController {
             dialogo.getLblInicioAlmuerzo().setText(r.horaInicioAlmuerzo == null ? "--:--:--" : r.horaInicioAlmuerzo.format(fmtHora));
             dialogo.getLblFinAlmuerzo().setText(r.horaFinAlmuerzo == null ? "--:--:--" : r.horaFinAlmuerzo.format(fmtHora));
             dialogo.getLblSalida().setText(r.horaSalida == null ? "--:--:--" : r.horaSalida.format(fmtHora));
-            dialogo.getLblHorasHoy().setText(String.format("%.1f h", r.calcularHoras()));
+
+            double minutosAlmuerzo = r.calcularMinutosAlmuerzo();
+            dialogo.getLblDuracionAlmuerzo().setText(String.format("%.0f min", minutosAlmuerzo)
+                    + (r.horaInicioAlmuerzo != null && r.horaFinAlmuerzo == null ? " (en curso)" : ""));
+
+            dialogo.getLblHorasHoy().setText(String.format("%.2f h", r.calcularHoras())
+                    + (r.horaEntrada != null && r.horaSalida == null ? " (en curso)" : ""));
 
             dialogo.getBtnMarcarEntrada().setEnabled(r.horaEntrada == null);
             dialogo.getBtnIniciarAlmuerzo().setEnabled(r.horaEntrada != null && r.horaInicioAlmuerzo == null && r.horaSalida == null);
@@ -1191,6 +1409,15 @@ public class VentasController {
 
         refrescarEstado.run();
         dialogo.getComboEmpleado().addActionListener(e -> refrescarEstado.run());
+
+        // Refresca en vivo cada segundo mientras el diálogo está abierto, para
+        // ver avanzar las horas trabajadas y el almuerzo sin tener que cerrar
+        // y volver a abrir la ventana.
+        javax.swing.Timer timerVivo = new javax.swing.Timer(1000, e -> refrescarEstado.run());
+        timerVivo.start();
+        dialogo.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override public void windowClosed(java.awt.event.WindowEvent e) { timerVivo.stop(); }
+        });
 
         dialogo.getBtnMarcarEntrada().addActionListener(e -> {
             String empleadoSel = (String) dialogo.getComboEmpleado().getSelectedItem();
@@ -1412,6 +1639,72 @@ public class VentasController {
         });
 
         dialogoPagos.setVisible(true);
+    }
+
+    /**
+     * Consulta un archivo de texto plano publicado en GitHub con dos líneas:
+     * la línea 1 es el número de versión más reciente (ej. "1.2.0") y la
+     * línea 2 es la URL de descarga del instalador de esa versión. Se
+     * ejecuta en un hilo aparte para no congelar la interfaz mientras se
+     * conecta a internet.
+     */
+    private void verificarActualizacionesReal(MainFrame.DialogoBuscarActualizaciones dialogo) {
+        new Thread(() -> {
+            try {
+                HttpClient cliente = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(8))
+                        .build();
+
+                HttpRequest peticion = HttpRequest.newBuilder()
+                        .uri(URI.create(URL_INFO_VERSION))
+                        .timeout(Duration.ofSeconds(8))
+                        .GET()
+                        .build();
+
+                HttpResponse<String> respuesta = cliente.send(peticion, HttpResponse.BodyHandlers.ofString());
+
+                if (respuesta.statusCode() != 200) {
+                    throw new IOException("Código HTTP " + respuesta.statusCode());
+                }
+
+                String[] lineas = respuesta.body().trim().split("\\R", 2);
+                String versionRemota = lineas[0].trim();
+                String urlDescarga = lineas.length > 1 ? lineas[1].trim() : "";
+
+                String versionLocalLimpia = VERSION_SOFTWARE.replaceFirst("^[vV]", "");
+                boolean hayNueva = esVersionMasNueva(versionRemota, versionLocalLimpia);
+
+                SwingUtilities.invokeLater(() -> {
+                    if (hayNueva) {
+                        dialogo.mostrarNuevaVersionDisponible(versionRemota, urlDescarga);
+                    } else {
+                        dialogo.mostrarAlDia();
+                    }
+                });
+            } catch (Exception ex) {
+                System.err.println("No se pudo verificar actualizaciones: " + ex.getMessage());
+                SwingUtilities.invokeLater(dialogo::mostrarError);
+            }
+        }).start();
+    }
+
+    /** Compara dos versiones estilo "1.2.0" número por número (no como texto). */
+    private boolean esVersionMasNueva(String remota, String local) {
+        try {
+            String[] r = remota.split("\\.");
+            String[] l = local.split("\\.");
+            int max = Math.max(r.length, l.length);
+            for (int i = 0; i < max; i++) {
+                int rv = i < r.length ? Integer.parseInt(r[i].replaceAll("[^0-9]", "").isEmpty() ? "0" : r[i].replaceAll("[^0-9]", "")) : 0;
+                int lv = i < l.length ? Integer.parseInt(l[i].replaceAll("[^0-9]", "").isEmpty() ? "0" : l[i].replaceAll("[^0-9]", "")) : 0;
+                if (rv != lv) {
+                    return rv > lv;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void abrirCentroReportes() {
@@ -1985,6 +2278,7 @@ public class VentasController {
 
         btnBuscarUpdates.addActionListener(e -> {
             MainFrame.DialogoBuscarActualizaciones dialogo = vista.new DialogoBuscarActualizaciones(vista);
+            verificarActualizacionesReal(dialogo);
             dialogo.setVisible(true);
         });
 

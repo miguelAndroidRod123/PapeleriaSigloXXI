@@ -1401,6 +1401,7 @@ public class MainFrame extends JFrame {
         private final JLabel lblEntrada;
         private final JLabel lblInicioAlmuerzo;
         private final JLabel lblFinAlmuerzo;
+        private final JLabel lblDuracionAlmuerzo;
         private final JLabel lblSalida;
         private final JLabel lblHorasHoy;
         private final JButton btnMarcarEntrada;
@@ -1410,7 +1411,8 @@ public class MainFrame extends JFrame {
 
         public DialogoAsistencia(Window padre, String[] empleados, String empleadoActual) {
             super(padre, "Control de Asistencia - Reloj Checador", ModalityType.APPLICATION_MODAL);
-            setSize(460, 420);
+            setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+            setSize(460, 460);
             setLocationRelativeTo(padre);
             setLayout(new BorderLayout(10, 10));
             setResizable(false);
@@ -1428,7 +1430,7 @@ public class MainFrame extends JFrame {
             panelEmpleado.add(comboEmpleado);
             panelSuperior.add(panelEmpleado, BorderLayout.NORTH);
 
-            JPanel panelEstado = new JPanel(new GridLayout(5, 2, 8, 6));
+            JPanel panelEstado = new JPanel(new GridLayout(6, 2, 8, 6));
             panelEstado.setOpaque(false);
             panelEstado.setBorder(BorderFactory.createEmptyBorder(10, 0, 10, 0));
 
@@ -1446,6 +1448,12 @@ public class MainFrame extends JFrame {
             lblFinAlmuerzo = new JLabel("--:--:--");
             lblFinAlmuerzo.setFont(FUENTE_TEXTO_BOLD);
             panelEstado.add(lblFinAlmuerzo);
+
+            panelEstado.add(new JLabel("Duración Almuerzo:"));
+            lblDuracionAlmuerzo = new JLabel("0 min");
+            lblDuracionAlmuerzo.setFont(FUENTE_TEXTO_BOLD);
+            lblDuracionAlmuerzo.setForeground(new Color(180, 120, 20));
+            panelEstado.add(lblDuracionAlmuerzo);
 
             panelEstado.add(new JLabel("Salida:"));
             lblSalida = new JLabel("--:--:--");
@@ -1494,6 +1502,7 @@ public class MainFrame extends JFrame {
         public JLabel getLblEntrada() { return lblEntrada; }
         public JLabel getLblInicioAlmuerzo() { return lblInicioAlmuerzo; }
         public JLabel getLblFinAlmuerzo() { return lblFinAlmuerzo; }
+        public JLabel getLblDuracionAlmuerzo() { return lblDuracionAlmuerzo; }
         public JLabel getLblSalida() { return lblSalida; }
         public JLabel getLblHorasHoy() { return lblHorasHoy; }
         public JButton getBtnMarcarEntrada() { return btnMarcarEntrada; }
@@ -1620,9 +1629,13 @@ public class MainFrame extends JFrame {
     // DIÁLOGO 5: BUSCADOR DE ACTUALIZACIONES (COMPATIBLE)
     // =========================================================================
     public class DialogoBuscarActualizaciones extends JDialog {
+        private final JLabel lblInfo;
+        private final JProgressBar progressBar;
+        private final JButton btnAccion;
+
         public DialogoBuscarActualizaciones(Window padre) {
             super(padre, "Verificación del Sistema", ModalityType.APPLICATION_MODAL);
-            setSize(400, 220);
+            setSize(420, 220);
             setLocationRelativeTo(padre);
             setLayout(new BorderLayout(10, 10));
             setResizable(false);
@@ -1630,28 +1643,57 @@ public class MainFrame extends JFrame {
             JPanel panel = new JPanel(new BorderLayout(15, 15));
             panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
-            JLabel lblInfo = new JLabel("Conectando con el servidor de Papelería Siglo XXI...", SwingConstants.CENTER);
+            lblInfo = new JLabel("Conectando con el servidor de Papelería Siglo XXI...", SwingConstants.CENTER);
             lblInfo.setFont(FUENTE_SUBTITULO);
 
-            JProgressBar progressBar = new JProgressBar();
+            progressBar = new JProgressBar();
             progressBar.setIndeterminate(true);
 
             panel.add(lblInfo, BorderLayout.NORTH);
             panel.add(progressBar, BorderLayout.CENTER);
 
-            JButton btnCerrar = crearBotonEstilizado("Entendido", COLOR_OSCURO, Color.WHITE);
-            btnCerrar.addActionListener(e -> dispose());
-            panel.add(btnCerrar, BorderLayout.SOUTH);
+            btnAccion = crearBotonEstilizado("Cerrar", COLOR_OSCURO, Color.WHITE);
+            btnAccion.addActionListener(e -> dispose());
+            panel.add(btnAccion, BorderLayout.SOUTH);
 
             add(panel);
+        }
 
-            javax.swing.Timer t = new javax.swing.Timer(2200, e -> {
-                progressBar.setIndeterminate(false);
-                progressBar.setValue(100);
-                lblInfo.setText("¡El sistema cuenta con la última versión instalada!");
+        /** El sistema ya tiene la última versión. */
+        public void mostrarAlDia() {
+            progressBar.setIndeterminate(false);
+            progressBar.setValue(100);
+            lblInfo.setText("<html><center>¡El sistema cuenta con la<br>última versión instalada!</center></html>");
+        }
+
+        /** No se pudo conectar (sin internet, GitHub caído, URL mal configurada, etc.). */
+        public void mostrarError() {
+            progressBar.setIndeterminate(false);
+            progressBar.setValue(0);
+            lblInfo.setText("<html><center>No se pudo verificar la versión.<br>Revise su conexión a internet e intente de nuevo.</center></html>");
+        }
+
+        /** Hay una versión más nueva publicada; se ofrece descargarla. */
+        public void mostrarNuevaVersionDisponible(String version, String urlDescarga) {
+            progressBar.setIndeterminate(false);
+            progressBar.setValue(100);
+            lblInfo.setText("<html><center>¡Hay una nueva versión disponible!<br><b>v" + version + "</b></center></html>");
+
+            btnAccion.setText("⬇ Descargar Ahora");
+            btnAccion.setBackground(COLOR_EXITO);
+            for (java.awt.event.ActionListener al : btnAccion.getActionListeners()) {
+                btnAccion.removeActionListener(al);
+            }
+            btnAccion.addActionListener(e -> {
+                try {
+                    java.awt.Desktop.getDesktop().browse(new java.net.URI(urlDescarga));
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this,
+                            "No se pudo abrir el navegador automáticamente.\nCopie este enlace manualmente:\n" + urlDescarga,
+                            "Abrir enlace", JOptionPane.WARNING_MESSAGE);
+                }
+                dispose();
             });
-            t.setRepeats(false);
-            t.start();
         }
     }
 

@@ -37,17 +37,34 @@ public class AsistenciaModelo {
         public LocalTime horaFinAlmuerzo;
         public LocalTime horaSalida;
 
-        /** Horas trabajadas ese día, descontando el almuerzo si fue marcado. */
+        /**
+         * Horas trabajadas hasta ahora, descontando el almuerzo. Funciona en
+         * vivo: si aún no se ha marcado Salida, calcula hasta el momento
+         * actual (útil para ver el avance del día sin esperar a la salida).
+         * El tiempo de almuerzo NUNCA se contabiliza como hora laboral
+         * (así lo exige la ley), aunque sí se sigue mostrando por separado.
+         */
         public double calcularHoras() {
-            if (horaEntrada == null || horaSalida == null) {
+            if (horaEntrada == null) {
                 return 0.0;
             }
-            double minutosTotales = java.time.Duration.between(horaEntrada, horaSalida).toMinutes();
-            if (horaInicioAlmuerzo != null && horaFinAlmuerzo != null) {
-                double minutosAlmuerzo = java.time.Duration.between(horaInicioAlmuerzo, horaFinAlmuerzo).toMinutes();
-                minutosTotales -= minutosAlmuerzo;
-            }
+            LocalTime finEfectivo = (horaSalida != null) ? horaSalida : LocalTime.now();
+            double minutosTotales = java.time.Duration.between(horaEntrada, finEfectivo).toMinutes();
+            minutosTotales -= calcularMinutosAlmuerzo();
             return Math.max(0.0, minutosTotales / 60.0);
+        }
+
+        /**
+         * Minutos de almuerzo transcurridos (informativo, NO se suman a las
+         * horas trabajadas). Si el almuerzo ya terminó, es la duración fija
+         * marcada; si sigue en curso, avanza en vivo hasta ahora.
+         */
+        public double calcularMinutosAlmuerzo() {
+            if (horaInicioAlmuerzo == null) {
+                return 0.0;
+            }
+            LocalTime finAlmuerzoEfectivo = (horaFinAlmuerzo != null) ? horaFinAlmuerzo : LocalTime.now();
+            return Math.max(0.0, java.time.Duration.between(horaInicioAlmuerzo, finAlmuerzoEfectivo).toMinutes());
         }
     }
 
