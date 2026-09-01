@@ -307,6 +307,12 @@ public class VentasController {
         vista.getItemReportes().addActionListener(e -> abrirCentroReportes());
         vista.getItemPagosEmpleados().addActionListener(e -> abrirCentroPagosEmpleados());
         vista.getItemControlAsistencia().addActionListener(e -> abrirControlAsistencia());
+
+        // Atajo de teclado: presionar Enter en el campo de Código/Nombre o en
+        // el de Cantidad agrega el producto al carrito directamente, sin
+        // necesidad de hacer clic en el botón "Agregar al Carrito".
+        vista.getTxtBusqueda().addActionListener(e -> agregarProductoVenta());
+        vista.getTxtCantidad().addActionListener(e -> agregarProductoVenta());
     }
 
     private void validarProducto() {
@@ -683,14 +689,14 @@ public class VentasController {
                 }
 
                 double totalSinEnvio = (proveedor + precioGestionUnitario) * cantidad;
-                double totalCliente = totalSinEnvio + envio;
+                double totalCliente = redondearAPesosColombianos(totalSinEnvio + envio);
                 double costoRealUnitario = proveedor + (envio / cantidad);
                 double precioVentaUnitario = totalCliente / cantidad;
 
                 lblDetalle.setText(String.format(
-                        "Proveedor/U: $%,.2f  +  Gestión/U: $%,.2f  +  Envío: $%,.2f  =  $%,.2f",
+                        "Proveedor/U: $%,.2f  +  Gestión/U: $%,.2f  +  Envío: $%,.2f  =  $%,.0f (redondeado)",
                         proveedor, precioGestionUnitario, envio, totalCliente));
-                lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.2f", totalCliente));
+                lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.0f", totalCliente));
                 lblResultado.setForeground(MainFrame.COLOR_EXITO);
             } catch (Exception ex) {
                 lblDetalle.setText("Ingrese un precio de proveedor válido.");
@@ -728,7 +734,7 @@ public class VentasController {
                     throw new NumberFormatException();
                 }
 
-                double totalCliente = (proveedor + precioGestionUnitario) * cantidad + envio;
+                double totalCliente = redondearAPesosColombianos((proveedor + precioGestionUnitario) * cantidad + envio);
                 double costoRealUnitario = proveedor + (envio / cantidad);
                 double precioVentaUnitario = totalCliente / cantidad;
 
@@ -872,10 +878,10 @@ public class VentasController {
                 double valorBase = parsearMontoFlexible(txtValorBase.getText());
                 if (valorBase < 0) throw new NumberFormatException();
 
-                double total = valorBase + comision;
-                lblDetalle.setText(String.format("Valor base: $%,.2f  +  Comisión: $%,.2f  =  $%,.2f",
+                double total = redondearAPesosColombianos(valorBase + comision);
+                lblDetalle.setText(String.format("Valor base: $%,.2f  +  Comisión: $%,.2f  =  $%,.0f (redondeado)",
                         valorBase, comision, total));
-                lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.2f", total));
+                lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.0f", total));
                 lblResultado.setForeground(MainFrame.COLOR_EXITO);
             } catch (Exception ex) {
                 lblDetalle.setText("Ingrese un valor base válido.");
@@ -898,7 +904,7 @@ public class VentasController {
                 double valorBase = parsearMontoFlexible(txtValorBase.getText());
                 if (valorBase < 0) throw new NumberFormatException();
 
-                double total = valorBase + comision;
+                double total = redondearAPesosColombianos(valorBase + comision);
                 resultado[0] = new CotizacionServicioBase(valorBase, comision, total);
                 dialogo.dispose();
             } catch (NumberFormatException ex) {
@@ -920,6 +926,18 @@ public class VentasController {
         recalcular.run();
         dialogo.setVisible(true);
         return resultado[0];
+    }
+
+    /**
+     * Redondea un valor calculado a la centena de pesos más cercana. En
+     * Colombia ya no circulan los centavos, y en la práctica el cobro en
+     * efectivo se maneja en múltiplos de $100 (aunque existan monedas de
+     * $50). Se usa en cualquier total que resulte de una suma/resta/multi-
+     * plicación (comisiones, envíos, etc.), nunca sobre precios que ya
+     * vienen exactos desde el Excel.
+     */
+    private double redondearAPesosColombianos(double valor) {
+        return Math.round(valor / 100.0) * 100.0;
     }
 
     /** Convierte montos escritos con formato colombiano o decimal simple. */
