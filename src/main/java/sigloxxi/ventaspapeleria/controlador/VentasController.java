@@ -40,7 +40,7 @@ public class VentasController {
     private final InventarioModelo modeloInventario;
     private final String nombreEmpleado;
 
-    private static final String VERSION_SOFTWARE = "v1.2.0";
+    private static final String VERSION_SOFTWARE = "v1.3.1";
     private static final String URL_INFO_VERSION = "https://raw.githubusercontent.com/miguelAndroidRod123/PapeleriaSigloXXI/main/version.txt";
     private static final String NOMBRE_ARCHIVO_SESION = "sesion_actual.recuperacion";
     private static final List<String> registroVentasDelDia = new ArrayList<>();
@@ -56,6 +56,10 @@ public class VentasController {
     private double totalGeneral = 0.0;
     private final AsistenciaModelo asistenciaModelo = new AsistenciaModelo();
     private javax.swing.Timer timerMonitorInventario;
+    private javax.swing.Timer timerBotonAsistencia;
+
+    private static final java.time.LocalTime HORA_INICIO_VENTANA_ALMUERZO = java.time.LocalTime.of(12, 0);
+    private static final java.time.LocalTime HORA_FIN_VENTANA_ALMUERZO = java.time.LocalTime.of(14, 0);
 
     public VentasController(MainFrame vista, InventarioModelo modeloInventario, String nombreEmpleado) {
         this.vista = vista;
@@ -64,7 +68,88 @@ public class VentasController {
 
         initListeners();
         verificarSesionInterrumpida();
+        verificarActualizacionRecienInstalada();
+        marcarEntradaAutomatica();
         iniciarMonitorInventario();
+        iniciarBotonAsistenciaRapida();
+    }
+
+    /**
+     * Marca la Entrada del empleado apenas inicia sesión en el programa, sin
+     * necesidad de que la marque manualmente. Si ya se había marcado hoy
+     * (por ejemplo, si reinició el programa a mitad de turno), no hace nada.
+     */
+    private void marcarEntradaAutomatica() {
+        AsistenciaModelo.RegistroAsistencia registroHoy = asistenciaModelo.obtenerEstadoHoy(nombreEmpleado);
+        if (registroHoy.horaEntrada == null) {
+            asistenciaModelo.marcarEntrada(nombreEmpleado);
+        }
+    }
+
+    /**
+     * Botón único junto a "Agregar al Carrito" que siempre muestra la
+     * siguiente acción de asistencia que corresponde según la hora:
+     * Iniciar/Terminar Almuerzo durante la ventana de almuerzo (12:00m a
+     * 2:00pm), o Marcar Salida el resto del tiempo. La Entrada ya no se
+     * marca desde aquí porque se marca sola al iniciar sesión.
+     */
+    private void iniciarBotonAsistenciaRapida() {
+        actualizarBotonAsistenciaRapida();
+
+        vista.getBtnAsistenciaRapida().addActionListener(e -> {
+            AsistenciaModelo.RegistroAsistencia r = asistenciaModelo.obtenerEstadoHoy(nombreEmpleado);
+            java.time.LocalTime ahora = java.time.LocalTime.now();
+            boolean enVentanaAlmuerzo = !ahora.isBefore(HORA_INICIO_VENTANA_ALMUERZO) && !ahora.isAfter(HORA_FIN_VENTANA_ALMUERZO);
+
+            String error;
+            if (r.horaInicioAlmuerzo != null && r.horaFinAlmuerzo == null) {
+                error = asistenciaModelo.marcarFinAlmuerzo(nombreEmpleado);
+            } else if (enVentanaAlmuerzo && r.horaInicioAlmuerzo == null) {
+                error = asistenciaModelo.marcarInicioAlmuerzo(nombreEmpleado);
+            } else {
+                error = asistenciaModelo.marcarSalida(nombreEmpleado);
+            }
+
+            if (error != null) {
+                JOptionPane.showMessageDialog(vista, error, "Aviso de Asistencia", JOptionPane.WARNING_MESSAGE);
+            }
+            actualizarBotonAsistenciaRapida();
+        });
+
+        // Revisa cada 30 segundos si ya entramos o salimos de la ventana de
+        // almuerzo, para que el botón cambie solo sin que el usuario tenga
+        // que hacer nada.
+        timerBotonAsistencia = new javax.swing.Timer(30_000, e -> actualizarBotonAsistenciaRapida());
+        timerBotonAsistencia.start();
+    }
+
+    private void actualizarBotonAsistenciaRapida() {
+        AsistenciaModelo.RegistroAsistencia r = asistenciaModelo.obtenerEstadoHoy(nombreEmpleado);
+        java.time.LocalTime ahora = java.time.LocalTime.now();
+        boolean enVentanaAlmuerzo = !ahora.isBefore(HORA_INICIO_VENTANA_ALMUERZO) && !ahora.isAfter(HORA_FIN_VENTANA_ALMUERZO);
+
+        JButton boton = vista.getBtnAsistenciaRapida();
+
+        if (r.horaSalida != null) {
+            boton.setText("Turno Finalizado");
+            boton.setEnabled(false);
+            boton.setBackground(new Color(150, 150, 150));
+        } else if (r.horaInicioAlmuerzo != null && r.horaFinAlmuerzo == null) {
+            boton.setEnabled(true);
+            boton.setText("Terminar Almuerzo");
+            boton.setBackground(new Color(230, 160, 30));
+            boton.setIcon(vista.cargarIcono(MainFrame.RUTA_ICONOS + "ICONO-ALMUERZO.png", 18, 18));
+        } else if (enVentanaAlmuerzo && r.horaInicioAlmuerzo == null) {
+            boton.setEnabled(true);
+            boton.setText("Iniciar Almuerzo");
+            boton.setBackground(new Color(230, 160, 30));
+            boton.setIcon(vista.cargarIcono(MainFrame.RUTA_ICONOS + "ICONO-ALMUERZO.png", 18, 18));
+        } else {
+            boton.setEnabled(true);
+            boton.setText("Marcar Salida");
+            boton.setBackground(MainFrame.COLOR_PELIGRO);
+            boton.setIcon(vista.cargarIcono(MainFrame.RUTA_ICONOS + "ICONO-SALIDA-TURNO.png", 18, 18));
+        }
     }
 
     /**
@@ -1444,6 +1529,7 @@ public class VentasController {
                 JOptionPane.showMessageDialog(dialogo, error, "Aviso", JOptionPane.WARNING_MESSAGE);
             }
             refrescarEstado.run();
+            actualizarBotonAsistenciaRapida();
         });
 
         dialogo.getBtnIniciarAlmuerzo().addActionListener(e -> {
@@ -1453,6 +1539,7 @@ public class VentasController {
                 JOptionPane.showMessageDialog(dialogo, error, "Aviso", JOptionPane.WARNING_MESSAGE);
             }
             refrescarEstado.run();
+            actualizarBotonAsistenciaRapida();
         });
 
         dialogo.getBtnTerminarAlmuerzo().addActionListener(e -> {
@@ -1462,6 +1549,7 @@ public class VentasController {
                 JOptionPane.showMessageDialog(dialogo, error, "Aviso", JOptionPane.WARNING_MESSAGE);
             }
             refrescarEstado.run();
+            actualizarBotonAsistenciaRapida();
         });
 
         dialogo.getBtnMarcarSalida().addActionListener(e -> {
@@ -1473,9 +1561,91 @@ public class VentasController {
                 JOptionPane.showMessageDialog(dialogo, "Salida registrada. ¡Buen trabajo hoy!", "Asistencia", JOptionPane.INFORMATION_MESSAGE);
             }
             refrescarEstado.run();
+            actualizarBotonAsistenciaRapida();
         });
 
         dialogo.setVisible(true);
+    }
+
+    /**
+     * Desglose de horas de un período según la legislación laboral
+     * colombiana vigente (Código Sustantivo del Trabajo, modificado por la
+     * Ley 2101 de 2021 y la Ley 2466 de 2025):
+     * - Jornada máxima legal: 42 horas semanales / 8 horas diarias (vigente
+     *   desde el 15 de julio de 2026).
+     * - Recargo nocturno (7:00 p.m. a 6:00 a.m.): 35% sobre la hora ordinaria.
+     * - Hora extra diurna: 25% adicional. Hora extra nocturna: 75% adicional.
+     *
+     * Nota: las horas extra se calculan sobre el total del período frente al
+     * límite legal correspondiente; para separar cuánto de ese excedente es
+     * nocturno se usa una aproximación razonable (se toman primero como
+     * nocturnas ordinarias las horas nocturnas que quepan dentro del límite
+     * legal, y el resto de horas nocturnas se trata como extra nocturna).
+     * Para casos límite o turnos complejos, se recomienda validar con un
+     * profesional de nómina.
+     */
+    private static class ClasificacionHorasLegal {
+        final double horasTotales;
+        final double horasNocturnasTotales;
+        final double limiteLegalHoras;
+        final double horasOrdinariasDiurnas;
+        final double horasOrdinariasNocturnas;
+        final double horasExtraDiurnas;
+        final double horasExtraNocturnas;
+        final double valorCalculado;
+
+        ClasificacionHorasLegal(double horasTotales, double horasNocturnasTotales, double limiteLegalHoras,
+                double horasOrdinariasDiurnas, double horasOrdinariasNocturnas,
+                double horasExtraDiurnas, double horasExtraNocturnas, double valorCalculado) {
+            this.horasTotales = horasTotales;
+            this.horasNocturnasTotales = horasNocturnasTotales;
+            this.limiteLegalHoras = limiteLegalHoras;
+            this.horasOrdinariasDiurnas = horasOrdinariasDiurnas;
+            this.horasOrdinariasNocturnas = horasOrdinariasNocturnas;
+            this.horasExtraDiurnas = horasExtraDiurnas;
+            this.horasExtraNocturnas = horasExtraNocturnas;
+            this.valorCalculado = valorCalculado;
+        }
+    }
+
+    private ClasificacionHorasLegal calcularClasificacionHorasLegal(
+            String empleado, LocalDate inicio, LocalDate fin, String conceptoSel, double valorHoraOrdinaria) {
+
+        double horasTotales = asistenciaModelo.calcularHorasTrabajadas(empleado, inicio, fin);
+        double horasNocturnasTotales = asistenciaModelo.calcularHorasNocturnasTrabajadas(empleado, inicio, fin);
+
+        double limiteLegalHoras;
+        if ("Sueldo Diario".equals(conceptoSel)) {
+            limiteLegalHoras = 8.0;
+        } else if ("Sueldo Semanal".equals(conceptoSel)) {
+            limiteLegalHoras = 42.0;
+        } else {
+            // Sueldo Mensual (u otro período más largo): se prorratea el
+            // límite semanal de 42h según la cantidad de días del rango.
+            long diasPeriodo = java.time.temporal.ChronoUnit.DAYS.between(inicio, fin) + 1;
+            limiteLegalHoras = 42.0 * (diasPeriodo / 7.0);
+        }
+
+        double horasExtraTotal = Math.max(0.0, horasTotales - limiteLegalHoras);
+        double horasOrdinariasTotal = horasTotales - horasExtraTotal;
+
+        // De las horas nocturnas, las que quepan dentro de las ordinarias
+        // llevan recargo del 35%; el resto (si las nocturnas superan lo que
+        // cupo en la jornada ordinaria) se paga como extra nocturna al 75%.
+        double horasOrdinariasNocturnas = Math.min(horasNocturnasTotales, horasOrdinariasTotal);
+        double horasExtraNocturnas = Math.max(0.0, horasNocturnasTotales - horasOrdinariasNocturnas);
+        double horasExtraDiurnas = Math.max(0.0, horasExtraTotal - horasExtraNocturnas);
+        double horasOrdinariasDiurnas = horasOrdinariasTotal - horasOrdinariasNocturnas;
+
+        double pagoOrdinarioDiurno = horasOrdinariasDiurnas * valorHoraOrdinaria;
+        double pagoOrdinarioNocturno = horasOrdinariasNocturnas * valorHoraOrdinaria * 1.35;
+        double pagoExtraDiurna = horasExtraDiurnas * valorHoraOrdinaria * 1.25;
+        double pagoExtraNocturna = horasExtraNocturnas * valorHoraOrdinaria * 1.75;
+
+        double valorCalculado = pagoOrdinarioDiurno + pagoOrdinarioNocturno + pagoExtraDiurna + pagoExtraNocturna;
+
+        return new ClasificacionHorasLegal(horasTotales, horasNocturnasTotales, limiteLegalHoras,
+                horasOrdinariasDiurnas, horasOrdinariasNocturnas, horasExtraDiurnas, horasExtraNocturnas, valorCalculado);
     }
 
     private void abrirCentroPagosEmpleados() {
@@ -1541,14 +1711,6 @@ public class VentasController {
                 dialogoPagos.getLblVentasTotales().setText(String.format("$%.2f", ventasBase));
 
                 String empleadoSel = (String) dialogoPagos.getComboEmpleado().getSelectedItem();
-                double horasTrabajadas = asistenciaModelo.calcularHorasTrabajadas(empleadoSel, inicioPeriodo, finPeriodo);
-                dialogoPagos.getLblHorasTrabajadas().setText(String.format("%.1f h", horasTrabajadas));
-
-                double porcentaje = 0.0;
-                String pctText = dialogoPagos.getTxtPorcentajeComision().getText().trim().replace(",", ".");
-                if (!pctText.isEmpty()) {
-                    porcentaje = Double.parseDouble(pctText);
-                }
 
                 double tarifaHora = 0.0;
                 String tarifaText = dialogoPagos.getTxtTarifaHora().getText().trim().replace(",", ".");
@@ -1556,9 +1718,29 @@ public class VentasController {
                     tarifaHora = Double.parseDouble(tarifaText);
                 }
 
-                double sueldoPorHoras = horasTrabajadas * tarifaHora;
+                ClasificacionHorasLegal clasif = calcularClasificacionHorasLegal(
+                        empleadoSel, inicioPeriodo, finPeriodo, conceptoSel, tarifaHora);
+
+                dialogoPagos.getLblHorasTrabajadas().setText(String.format("%.1f h (límite legal: %.1f h)",
+                        clasif.horasTotales, clasif.limiteLegalHoras));
+                dialogoPagos.getLblHorasTrabajadas().setToolTipText(String.format(
+                        "<html>Ordinarias diurnas: %.2f h (100%%)<br>"
+                        + "Ordinarias nocturnas (7pm-6am): %.2f h (recargo 35%%)<br>"
+                        + "Extra diurna: %.2f h (recargo 25%%)<br>"
+                        + "Extra nocturna: %.2f h (recargo 75%%)<br>"
+                        + "Jornada legal vigente: 42h semanales / 8h diarias (Ley 2101 de 2021 y Ley 2466 de 2025)</html>",
+                        clasif.horasOrdinariasDiurnas, clasif.horasOrdinariasNocturnas,
+                        clasif.horasExtraDiurnas, clasif.horasExtraNocturnas));
+
+                double porcentaje = 0.0;
+                String pctText = dialogoPagos.getTxtPorcentajeComision().getText().trim().replace(",", ".");
+                if (!pctText.isEmpty()) {
+                    porcentaje = Double.parseDouble(pctText);
+                }
+
+                double sueldoPorHoras = clasif.valorCalculado;
                 double comisionVentas = ventasBase * (porcentaje / 100.0);
-                double montoPagar = sueldoPorHoras + comisionVentas;
+                double montoPagar = redondearAPesosColombianos(sueldoPorHoras + comisionVentas);
                 dialogoPagos.getTxtMontoPagar().setText(String.format("%.2f", montoPagar));
 
             } catch (Exception ignored) {
@@ -1666,6 +1848,171 @@ public class VentasController {
      * ejecuta en un hilo aparte para no congelar la interfaz mientras se
      * conecta a internet.
      */
+    private static final String PREF_VERSION_RECIEN_ACTUALIZADA = "VERSION_RECIEN_ACTUALIZADA";
+
+    /**
+     * Descarga el instalador en segundo plano (mostrando progreso real en la
+     * misma ventana), y al terminar lo ejecuta de forma totalmente silenciosa
+     * (sin ningún asistente visible). El propio programa se cierra para
+     * soltar el archivo .exe que va a ser reemplazado, y un pequeño script
+     * de apoyo relanza la aplicación ya actualizada cuando el instalador
+     * termina. Al volver a abrir, se muestra un aviso de "Actualizado a la
+     * versión X" (ver verificarActualizacionRecienInstalada, llamado al
+     * iniciar sesión).
+     */
+    private void descargarEInstalarActualizacionSilenciosa(MainFrame.DialogoBuscarActualizaciones dialogo, String version, String urlDescarga) {
+        if (urlDescarga == null || urlDescarga.isBlank()) {
+            JOptionPane.showMessageDialog(dialogo, "El enlace de descarga no está disponible.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        dialogo.getBtnAccion().setEnabled(false);
+        dialogo.getProgressBar().setIndeterminate(false);
+        dialogo.getProgressBar().setValue(0);
+        dialogo.getLblInfo().setText("<html><center>Descargando actualización v" + version + "...<br>0%</center></html>");
+
+        new Thread(() -> {
+            try {
+                File archivoInstalador = new File(System.getProperty("java.io.tmpdir"),
+                        "Instalador_PapeleriaSigloXXI_v" + version + ".exe");
+
+                HttpClient cliente = HttpClient.newBuilder()
+                        .followRedirects(HttpClient.Redirect.ALWAYS)
+                        .connectTimeout(Duration.ofSeconds(10))
+                        .build();
+
+                HttpRequest peticion = HttpRequest.newBuilder()
+                        .uri(URI.create(urlDescarga))
+                        .timeout(Duration.ofMinutes(5))
+                        .GET()
+                        .build();
+
+                HttpResponse<InputStream> respuesta = cliente.send(peticion, HttpResponse.BodyHandlers.ofInputStream());
+                if (respuesta.statusCode() != 200) {
+                    throw new IOException("Código HTTP " + respuesta.statusCode());
+                }
+
+                long totalBytes = respuesta.headers().firstValueAsLong("Content-Length").orElse(-1);
+                long descargados = 0;
+
+                try (InputStream in = respuesta.body();
+                     FileOutputStream out = new FileOutputStream(archivoInstalador)) {
+                    byte[] buffer = new byte[8192];
+                    int leidos;
+                    while ((leidos = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, leidos);
+                        descargados += leidos;
+
+                        if (totalBytes > 0) {
+                            int porcentaje = (int) ((descargados * 100) / totalBytes);
+                            SwingUtilities.invokeLater(() -> {
+                                dialogo.getProgressBar().setValue(porcentaje);
+                                dialogo.getLblInfo().setText("<html><center>Descargando actualización v" + version
+                                        + "...<br>" + porcentaje + "%</center></html>");
+                            });
+                        }
+                    }
+                }
+
+                SwingUtilities.invokeLater(() -> {
+                    dialogo.getProgressBar().setIndeterminate(true);
+                    dialogo.getLblInfo().setText("<html><center>Instalando actualización v" + version
+                            + "...<br>El programa se cerrará y volverá a abrir solo.</center></html>");
+                });
+
+                // Pequeña pausa para que el usuario alcance a leer el mensaje
+                // antes de que la ventana se cierre.
+                Thread.sleep(1500);
+
+                ejecutarInstalacionSilenciosaYRelanzar(archivoInstalador, version);
+
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    dialogo.getProgressBar().setIndeterminate(false);
+                    dialogo.getProgressBar().setValue(0);
+                    dialogo.getLblInfo().setText("<html><center>No se pudo descargar la actualización.<br>"
+                            + "Revise su conexión e intente de nuevo.</center></html>");
+                    dialogo.getBtnAccion().setEnabled(true);
+                });
+                System.err.println("Error al descargar/instalar actualización: " + ex.getMessage());
+            }
+        }).start();
+    }
+
+    /**
+     * Arma un pequeño script de apoyo (.bat) que espera a que este programa
+     * termine de cerrarse, corre el instalador con banderas silenciosas
+     * (sin ningún asistente visible), y vuelve a abrir la aplicación ya
+     * actualizada. Se necesita este paso intermedio porque Windows no deja
+     * que el instalador reemplace el .exe mientras sigue en ejecución.
+     */
+    private void ejecutarInstalacionSilenciosaYRelanzar(File archivoInstalador, String version) throws IOException {
+        String rutaEjecutableActual;
+        try {
+            rutaEjecutableActual = ProcessHandle.current().info().command().orElse(null);
+        } catch (Exception ex) {
+            rutaEjecutableActual = null;
+        }
+
+        if (rutaEjecutableActual == null || !rutaEjecutableActual.toLowerCase().endsWith(".exe")) {
+            // No se pudo determinar la ruta del .exe actual (por ejemplo, si
+            // se está ejecutando desde NetBeans en modo pruebas). En ese caso
+            // se instala igual de forma silenciosa, pero no se puede relanzar
+            // solo: se le avisa al usuario que lo abra manualmente.
+            ProcessBuilder pbInstalador = new ProcessBuilder(
+                    archivoInstalador.getAbsolutePath(), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART");
+            pbInstalador.start();
+            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(vista,
+                    "La actualización se está instalando en segundo plano.\n"
+                    + "Cierre y vuelva a abrir el programa en unos segundos.",
+                    "Instalando", JOptionPane.INFORMATION_MESSAGE));
+            return;
+        }
+
+        // Guarda el marcador ANTES de cerrar: la próxima vez que arranque el
+        // programa, revisa este valor para mostrar el aviso de "actualizado".
+        Preferences prefs = Preferences.userNodeForPackage(VentasController.class);
+        prefs.put(PREF_VERSION_RECIEN_ACTUALIZADA, version);
+
+        File scriptTemporal = new File(System.getProperty("java.io.tmpdir"), "actualizar_papeleria.bat");
+        String contenidoScript =
+                "@echo off\r\n"
+                + "timeout /t 2 /nobreak >nul\r\n"
+                + "start /wait \"\" \"" + archivoInstalador.getAbsolutePath() + "\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART\r\n"
+                + "start \"\" \"" + rutaEjecutableActual + "\"\r\n"
+                + "(goto) 2>nul & del \"%~f0\"\r\n";
+
+        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
+                new FileOutputStream(scriptTemporal), StandardCharsets.UTF_8))) {
+            writer.print(contenidoScript);
+        }
+
+        ProcessBuilder pbScript = new ProcessBuilder("cmd", "/c", "start", "", scriptTemporal.getAbsolutePath());
+        pbScript.start();
+
+        // Se cierra el programa actual para soltar el archivo .exe que el
+        // instalador necesita reemplazar. El script ya lanzado en segundo
+        // plano se encarga de instalar y volver a abrir la aplicación.
+        System.exit(0);
+    }
+
+    /**
+     * Revisa si el programa se acaba de actualizar (marcador dejado por
+     * descargarEInstalarActualizacionSilenciosa) y, si es así, muestra un
+     * aviso breve confirmándolo. Se llama una sola vez al iniciar sesión.
+     */
+    private void verificarActualizacionRecienInstalada() {
+        Preferences prefs = Preferences.userNodeForPackage(VentasController.class);
+        String versionActualizada = prefs.get(PREF_VERSION_RECIEN_ACTUALIZADA, null);
+        if (versionActualizada != null && !versionActualizada.isBlank()) {
+            prefs.remove(PREF_VERSION_RECIEN_ACTUALIZADA);
+            JOptionPane.showMessageDialog(vista,
+                    "¡El programa se actualizó correctamente a la versión " + versionActualizada + "!",
+                    "Actualización Completa",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
     private void verificarActualizacionesReal(MainFrame.DialogoBuscarActualizaciones dialogo) {
         new Thread(() -> {
             try {
@@ -1695,6 +2042,8 @@ public class VentasController {
                 SwingUtilities.invokeLater(() -> {
                     if (hayNueva) {
                         dialogo.mostrarNuevaVersionDisponible(versionRemota, urlDescarga);
+                        dialogo.getBtnAccion().addActionListener(
+                                e -> descargarEInstalarActualizacionSilenciosa(dialogo, versionRemota, urlDescarga));
                     } else {
                         dialogo.mostrarAlDia();
                     }

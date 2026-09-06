@@ -84,6 +84,7 @@ public class MainFrame extends JFrame {
     private JTextField txtCantidad;
     private JButton btnValidar;
     private JButton btnAgregar;
+    private JButton btnAsistenciaRapida;
     private JButton btnLimpiarBusqueda;
     private JLabel lblEstadoProducto;
 
@@ -363,6 +364,10 @@ public class MainFrame extends JFrame {
         btnAgregar = crearBotonEstilizado("Agregar al Carrito", COLOR_EXITO, Color.WHITE);
         configurarIconoBoton(btnAgregar, "ICONO-CARRITO-COMPRAS.png", 20, 20);
 
+        btnAsistenciaRapida = crearBotonEstilizado("Marcar Salida", new Color(230, 160, 30), Color.WHITE);
+        configurarIconoBoton(btnAsistenciaRapida, "ICONO-ASISTENCIA.png", 18, 18);
+        btnAsistenciaRapida.setToolTipText("Marca automáticamente lo que corresponda según la hora: almuerzo o salida");
+
         lblEstadoProducto = new JLabel(" ");
         lblEstadoProducto.setFont(FUENTE_TEXTO);
         lblEstadoProducto.setForeground(COLOR_PRIMARIO);
@@ -374,6 +379,7 @@ public class MainFrame extends JFrame {
         panelEntrada.add(txtCantidad);
         panelEntrada.add(btnValidar);
         panelEntrada.add(btnAgregar);
+        panelEntrada.add(btnAsistenciaRapida);
         panelEntrada.add(lblEstadoProducto);
 
         panelCabecera.add(panelInfoEmpresa, BorderLayout.NORTH);
@@ -942,6 +948,7 @@ public class MainFrame extends JFrame {
     public JTextField getTxtCantidad() { return txtCantidad; }
     public JButton getBtnValidar() { return btnValidar; }
     public JButton getBtnAgregar() { return btnAgregar; }
+    public JButton getBtnAsistenciaRapida() { return btnAsistenciaRapida; }
     public JButton getBtnEliminarItem() { return btnEliminarItem; }
     public JButton getBtnCancelarVenta() { return btnCancelarVenta; }
     public JButton getBtnCobrar() { return btnCobrar; }
@@ -1673,28 +1680,24 @@ public class MainFrame extends JFrame {
             lblInfo.setText("<html><center>No se pudo verificar la versión.<br>Revise su conexión a internet e intente de nuevo.</center></html>");
         }
 
-        /** Hay una versión más nueva publicada; se ofrece descargarla. */
+        /** Hay una versión más nueva publicada; se ofrece descargarla. El
+         *  clic del botón lo conecta VentasController (necesita red y
+         *  acceso al sistema operativo para la instalación silenciosa). */
         public void mostrarNuevaVersionDisponible(String version, String urlDescarga) {
             progressBar.setIndeterminate(false);
             progressBar.setValue(100);
             lblInfo.setText("<html><center>¡Hay una nueva versión disponible!<br><b>v" + version + "</b></center></html>");
 
-            btnAccion.setText("⬇ Descargar Ahora");
+            btnAccion.setText("⬇ Descargar e Instalar");
             btnAccion.setBackground(COLOR_EXITO);
             for (java.awt.event.ActionListener al : btnAccion.getActionListeners()) {
                 btnAccion.removeActionListener(al);
             }
-            btnAccion.addActionListener(e -> {
-                try {
-                    java.awt.Desktop.getDesktop().browse(new java.net.URI(urlDescarga));
-                } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(this,
-                            "No se pudo abrir el navegador automáticamente.\nCopie este enlace manualmente:\n" + urlDescarga,
-                            "Abrir enlace", JOptionPane.WARNING_MESSAGE);
-                }
-                dispose();
-            });
         }
+
+        public JLabel getLblInfo() { return lblInfo; }
+        public JProgressBar getProgressBar() { return progressBar; }
+        public JButton getBtnAccion() { return btnAccion; }
     }
 
     // =========================================================================

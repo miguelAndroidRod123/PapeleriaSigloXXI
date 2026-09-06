@@ -66,6 +66,67 @@ public class AsistenciaModelo {
             LocalTime finAlmuerzoEfectivo = (horaFinAlmuerzo != null) ? horaFinAlmuerzo : LocalTime.now();
             return Math.max(0.0, java.time.Duration.between(horaInicioAlmuerzo, finAlmuerzoEfectivo).toMinutes());
         }
+
+        // Jornada nocturna vigente en Colombia desde el 25 de diciembre de
+        // 2025 (Ley 2466 de 2025, que modificó el art. 160 del CST):
+        // de 7:00 p.m. a 6:00 a.m. Antes de esa reforma empezaba a las 9:00 p.m.
+        private static final LocalTime INICIO_JORNADA_NOCTURNA = LocalTime.of(19, 0);
+        private static final LocalTime FIN_JORNADA_NOCTURNA = LocalTime.of(6, 0);
+
+        /**
+         * Horas de este día (ya trabajadas, dentro del turno registrado) que
+         * caen dentro de la franja nocturna legal (7:00 p.m. a 6:00 a.m.).
+         * Se calcula sobre el mismo día calendario (no contempla turnos que
+         * cruzan la medianoche, poco usual en este tipo de negocio). Se
+         * descuenta el almuerzo si llegó a caer en esa franja.
+         */
+        public double calcularHorasNocturnas() {
+            if (horaEntrada == null) {
+                return 0.0;
+            }
+            LocalTime finEfectivo = (horaSalida != null) ? horaSalida : LocalTime.now();
+
+            double minutosNocturnos = solapeMinutos(horaEntrada, finEfectivo, LocalTime.MIDNIGHT, FIN_JORNADA_NOCTURNA)
+                    + solapeMinutos(horaEntrada, finEfectivo, INICIO_JORNADA_NOCTURNA, LocalTime.of(23, 59, 59));
+
+            if (horaInicioAlmuerzo != null) {
+                LocalTime finAlmuerzoEfectivo = (horaFinAlmuerzo != null) ? horaFinAlmuerzo : LocalTime.now();
+                minutosNocturnos -= solapeMinutos(horaInicioAlmuerzo, finAlmuerzoEfectivo, LocalTime.MIDNIGHT, FIN_JORNADA_NOCTURNA)
+                        + solapeMinutos(horaInicioAlmuerzo, finAlmuerzoEfectivo, INICIO_JORNADA_NOCTURNA, LocalTime.of(23, 59, 59));
+            }
+
+            return Math.max(0.0, minutosNocturnos) / 60.0;
+        }
+
+        private double solapeMinutos(LocalTime inicioA, LocalTime finA, LocalTime inicioB, LocalTime finB) {
+            LocalTime inicio = inicioA.isAfter(inicioB) ? inicioA : inicioB;
+            LocalTime fin = finA.isBefore(finB) ? finA : finB;
+            if (inicio.isBefore(fin)) {
+                return java.time.Duration.between(inicio, fin).toMinutes();
+            }
+            return 0.0;
+        }
+    }
+
+    /** Todos los registros de un empleado dentro de un rango de fechas (ambos inclusive), ordenados por fecha. */
+    public List<RegistroAsistencia> listarRegistros(String empleado, LocalDate inicio, LocalDate fin) {
+        List<RegistroAsistencia> resultado = new ArrayList<>();
+        for (RegistroAsistencia r : leerTodos()) {
+            if (r.empleado.equalsIgnoreCase(empleado) && !r.fecha.isBefore(inicio) && !r.fecha.isAfter(fin)) {
+                resultado.add(r);
+            }
+        }
+        resultado.sort((a, b) -> a.fecha.compareTo(b.fecha));
+        return resultado;
+    }
+
+    /** Suma de horas nocturnas (dentro de las ya trabajadas) de un empleado en un rango de fechas. */
+    public double calcularHorasNocturnasTrabajadas(String empleado, LocalDate inicio, LocalDate fin) {
+        double total = 0.0;
+        for (RegistroAsistencia r : listarRegistros(empleado, inicio, fin)) {
+            total += r.calcularHorasNocturnas();
+        }
+        return total;
     }
 
     private File obtenerArchivo() {
