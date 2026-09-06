@@ -1237,6 +1237,7 @@ public class MainFrame extends JFrame {
         private final JLabel lblVentasTotales;
         private final JTextField txtPorcentajeComision;
         private final JTextField txtTarifaHora;
+        private final JLabel lblReferenciaLegalHora;
         private final JLabel lblHorasTrabajadas;
         private final JTextField txtMontoPagar;
         private final JLabel lblTotalPagadoHoy;
@@ -1251,7 +1252,7 @@ public class MainFrame extends JFrame {
 
         public DialogoPagoEmpleados(Window padre, String[] empleados, String empleadoActual) {
             super(padre, "Centro de Pagos y Liquidación a Empleados", ModalityType.APPLICATION_MODAL);
-            setSize(500, 560);
+            setSize(500, 600);
             setLocationRelativeTo(padre);
             setLayout(new BorderLayout(10, 10));
             setResizable(false);
@@ -1259,7 +1260,7 @@ public class MainFrame extends JFrame {
             this.inicioRango = LocalDate.now();
             this.finRango = LocalDate.now();
 
-            JPanel panelForm = new JPanel(new GridLayout(11, 2, 10, 10));
+            JPanel panelForm = new JPanel(new GridLayout(12, 2, 10, 10));
             panelForm.setBorder(BorderFactory.createEmptyBorder(20, 20, 10, 20));
             panelForm.setBackground(COLOR_FONDO);
 
@@ -1310,8 +1311,15 @@ public class MainFrame extends JFrame {
             panelForm.add(new JLabel("Tarifa por Hora ($):"));
             txtTarifaHora = new JTextField("0");
             txtTarifaHora.setFont(FUENTE_TEXTO);
-            txtTarifaHora.setToolTipText("Se multiplica por las horas reales marcadas en el Reloj Checador para ese período");
+            txtTarifaHora.setToolTipText("Se multiplica por las horas reales marcadas en el Reloj Checador para ese período. "
+                    + "Este es el valor que ustedes acuerden; no lo fija el sistema.");
             panelForm.add(txtTarifaHora);
+
+            panelForm.add(new JLabel("Ref. Legal Hora Ordinaria:"));
+            lblReferenciaLegalHora = new JLabel(" ");
+            lblReferenciaLegalHora.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+            lblReferenciaLegalHora.setForeground(new Color(120, 120, 120));
+            panelForm.add(lblReferenciaLegalHora);
 
             panelForm.add(new JLabel("Horas Trabajadas (Reloj):"));
             lblHorasTrabajadas = new JLabel("0.0 h");
@@ -1382,6 +1390,7 @@ public class MainFrame extends JFrame {
         public JLabel getLblVentasTotales() { return lblVentasTotales; }
         public JTextField getTxtPorcentajeComision() { return txtPorcentajeComision; }
         public JTextField getTxtTarifaHora() { return txtTarifaHora; }
+        public JLabel getLblReferenciaLegalHora() { return lblReferenciaLegalHora; }
         public JLabel getLblHorasTrabajadas() { return lblHorasTrabajadas; }
         public JTextField getTxtMontoPagar() { return txtMontoPagar; }
         public JLabel getLblTotalPagadoHoy() { return lblTotalPagadoHoy; }

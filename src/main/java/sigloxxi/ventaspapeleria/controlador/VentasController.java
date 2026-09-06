@@ -40,7 +40,16 @@ public class VentasController {
     private final InventarioModelo modeloInventario;
     private final String nombreEmpleado;
 
-    private static final String VERSION_SOFTWARE = "v1.3.1";
+    private static final String VERSION_SOFTWARE = "v1.4.0";
+
+    // Valor de referencia de la hora ordinaria legal en Colombia (SMMLV 2026
+    // dividido entre 210 horas mensuales, jornada de 42h vigente desde el
+    // 15/07/2026 - Ley 2101 de 2021 y Ley 2466 de 2025). Es SOLO informativo:
+    // el sistema no obliga a usar este valor en "Tarifa por Hora", solo lo
+    // muestra como referencia para el Centro de Pagos.
+    // IMPORTANTE: actualizar cada enero con el nuevo salario mínimo decretado
+    // por el Gobierno.
+    private static final double VALOR_HORA_ORDINARIA_LEGAL_REFERENCIA = 8338.0;
     private static final String URL_INFO_VERSION = "https://raw.githubusercontent.com/miguelAndroidRod123/PapeleriaSigloXXI/main/version.txt";
     private static final String NOMBRE_ARCHIVO_SESION = "sesion_actual.recuperacion";
     private static final List<String> registroVentasDelDia = new ArrayList<>();
@@ -1650,6 +1659,8 @@ public class VentasController {
 
     private void abrirCentroPagosEmpleados() {
         MainFrame.DialogoPagoEmpleados dialogoPagos = vista.new DialogoPagoEmpleados(vista, new String[]{this.nombreEmpleado, "Admin", "Auxiliar"}, this.nombreEmpleado);
+        dialogoPagos.getLblReferenciaLegalHora().setText(String.format(
+                "$%,.0f/h (solo informativo)", VALOR_HORA_ORDINARIA_LEGAL_REFERENCIA));
 
         dialogoPagos.getTxtMontoPagar().setEditable(false);
         dialogoPagos.getTxtMontoPagar().setFocusable(false);
@@ -1974,11 +1985,17 @@ public class VentasController {
         Preferences prefs = Preferences.userNodeForPackage(VentasController.class);
         prefs.put(PREF_VERSION_RECIEN_ACTUALIZADA, version);
 
+        // NOTA: se evita el comando "start" para ejecutar el instalador
+        // (llamando al .exe directamente, cmd espera a que termine igual
+        // que con "start /wait"), porque usarlo desde una carpeta protegida
+        // como "Program Files" puede producir el error de Windows "No hay
+        // suficientes recursos de memoria disponibles para procesar este
+        // comando" (un bug conocido de cmd.exe, no un problema real de RAM).
         File scriptTemporal = new File(System.getProperty("java.io.tmpdir"), "actualizar_papeleria.bat");
         String contenidoScript =
                 "@echo off\r\n"
                 + "timeout /t 2 /nobreak >nul\r\n"
-                + "start /wait \"\" \"" + archivoInstalador.getAbsolutePath() + "\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART\r\n"
+                + "\"" + archivoInstalador.getAbsolutePath() + "\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART\r\n"
                 + "start \"\" \"" + rutaEjecutableActual + "\"\r\n"
                 + "(goto) 2>nul & del \"%~f0\"\r\n";
 
@@ -1987,7 +2004,21 @@ public class VentasController {
             writer.print(contenidoScript);
         }
 
-        ProcessBuilder pbScript = new ProcessBuilder("cmd", "/c", "start", "", scriptTemporal.getAbsolutePath());
+        // Envoltorio VBS: ejecuta el .bat con la ventana totalmente oculta
+        // (0 = ventana oculta, False = no esperar a que termine). Así no se
+        // ve ninguna consola en ningún momento, ni siquiera un parpadeo.
+        File scriptOculto = new File(System.getProperty("java.io.tmpdir"), "actualizar_papeleria_oculto.vbs");
+        String contenidoVbs =
+                "Set objShell = CreateObject(\"WScript.Shell\")\r\n"
+                + "objShell.Run \"\"\"" + scriptTemporal.getAbsolutePath() + "\"\"\", 0, False\r\n";
+
+        try (PrintWriter writerVbs = new PrintWriter(new OutputStreamWriter(
+                new FileOutputStream(scriptOculto), StandardCharsets.UTF_8))) {
+            writerVbs.print(contenidoVbs);
+        }
+
+        ProcessBuilder pbScript = new ProcessBuilder("wscript.exe", "//B", scriptOculto.getAbsolutePath());
+        pbScript.directory(new File(System.getProperty("java.io.tmpdir")));
         pbScript.start();
 
         // Se cierra el programa actual para soltar el archivo .exe que el
