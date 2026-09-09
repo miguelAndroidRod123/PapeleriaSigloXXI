@@ -18,25 +18,9 @@ import java.util.prefs.Preferences;
 
 public class InventarioModelo {
 
-    private boolean modoPruebas = false;
     private final DataFormatter dataFormatter = new DataFormatter();
 
-    /** Constructor conservado para compatibilidad. Por defecto arranca en modo producción. */
     public InventarioModelo() {
-        this(false);
-    }
-
-    /** Permite controlar explícitamente el entorno desde el Main. */
-    public InventarioModelo(boolean modoPruebas) {
-        this.modoPruebas = modoPruebas;
-    }
-
-    public boolean isModoPruebas() {
-        return modoPruebas;
-    }
-
-    public void setModoPruebas(boolean modoPruebas) {
-        this.modoPruebas = modoPruebas;
     }
 
     /**
@@ -45,11 +29,10 @@ public class InventarioModelo {
      * y si no aparece, se le pide al usuario que lo ubique manualmente (y esa
      * elección queda guardada para la próxima vez).
      *
-     * NOTA: esta misma lógica se usa siempre, incluso si "Modo Pruebas" está
-     * activo (la bandera modoPruebas ahora solo afecta textos informativos
-     * como el título de la ventana). Antes existía una rama separada para
-     * pruebas que copiaba el Excel al directorio de trabajo actual; eso se
-     * quitó porque al instalarse en carpetas protegidas como
+     * NOTA: esta lógica se usa siempre igual, sin distinción de entornos.
+     * Antes existía una rama separada de "modo pruebas" que copiaba el Excel
+     * al directorio de trabajo actual; eso se quitó porque al instalarse en
+     * carpetas protegidas como
      * "Program Files" no se puede escribir ahí sin permisos de administrador,
      * lo que causaba el error "no se encontró el archivo de inventario".
      */
@@ -417,8 +400,8 @@ public class InventarioModelo {
     }
 
     /**
-     * Permite abrir directamente el buscador de archivos para vincular una nueva base de datos,
-     * desactivando el modo de pruebas y guardando la nueva ruta seleccionada.
+     * Permite abrir directamente el buscador de archivos para vincular una
+     * nueva base de datos, guardando la nueva ruta seleccionada.
      */
     public boolean seleccionarNuevoArchivoExcel(Component parent) {
         JFileChooser fileChooser = new JFileChooser();
@@ -432,7 +415,6 @@ public class InventarioModelo {
             if (nuevoArchivo.exists()) {
                 Preferences prefs = Preferences.userNodeForPackage(InventarioModelo.class);
                 prefs.put("RUTA_EXCEL_INVENTARIO", nuevoArchivo.getAbsolutePath());
-                this.modoPruebas = false; // Desactiva modo pruebas para usar la base de datos real seleccionada
 
                 JOptionPane.showMessageDialog(parent,
                         "¡Ubicación actualizada con éxito!\n" + nuevoArchivo.getAbsolutePath(),

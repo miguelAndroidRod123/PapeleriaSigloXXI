@@ -40,7 +40,7 @@ public class VentasController {
     private final InventarioModelo modeloInventario;
     private final String nombreEmpleado;
 
-    private static final String VERSION_SOFTWARE = "v1.4.0";
+    private static final String VERSION_SOFTWARE = "v1.4.2";
 
     // Valor de referencia de la hora ordinaria legal en Colombia (SMMLV 2026
     // dividido entre 210 horas mensuales, jornada de 42h vigente desde el
@@ -79,6 +79,7 @@ public class VentasController {
         verificarSesionInterrumpida();
         verificarActualizacionRecienInstalada();
         marcarEntradaAutomatica();
+        verificarRecordatorioReporteSemanal();
         iniciarMonitorInventario();
         iniciarBotonAsistenciaRapida();
     }
@@ -503,40 +504,50 @@ public class VentasController {
         boolean esPagoFacturas = "pagos de facturas".equalsIgnoreCase(nombreProductoLimpio);
         boolean esNequiMas100 = "retiros / recargas nequi +100".equalsIgnoreCase(nombreProductoLimpio);
         boolean esNequiMenos100 = "retiros / recargas nequi -100".equalsIgnoreCase(nombreProductoLimpio);
+        boolean esDaviplataMas100 = "retiros / recargas daviplata +100".equalsIgnoreCase(nombreProductoLimpio);
+        boolean esDaviplataMenos100 = "retiros / recargas daviplata -100".equalsIgnoreCase(nombreProductoLimpio);
 
         if (esImpresion3DPedido) {
-            CotizacionImpresion3D cotizacion = mostrarDialogoCostoImpresion3D(
+            CotizacionPedido3DMultiple pedido = mostrarDialogoCostoImpresion3D(
                     producto.getNombre(), producto.getPrecio(), cantidad);
 
-            if (cotizacion == null) {
-                // El usuario canceló: no se agrega nada al carrito.
+            if (pedido == null || pedido.items.isEmpty()) {
+                // El usuario canceló o no agregó ninguna pieza: no se agrega nada al carrito.
                 return;
             }
 
             // En impresión 3D no se agrupan filas por código porque dos pedidos
             // del mismo artículo pueden tener costos diferentes de proveedor.
-            double subtotal = cotizacion.totalCliente;
+            // Si el pedido trae una sola pieza se muestra igual que antes; si
+            // trae varias, se resume en una sola fila con el cálculo final ya
+            // hecho para todo el pedido.
+            String nombreFila = (pedido.items.size() == 1)
+                    ? producto.getNombre() + " - " + pedido.items.get(0).nombrePieza
+                    : producto.getNombre() + " (" + pedido.items.size() + " piezas: "
+                            + String.join(", ", pedido.nombresPiezas()) + ")";
+
+            double precioVentaPromedioUnitario = pedido.totalCliente / pedido.cantidadTotalPiezas;
+
             vista.getModeloTabla().addRow(new Object[]{
                 producto.getCodigo(),
-                producto.getNombre(),
-                cantidad,
-                String.format("%.2f", cotizacion.precioVentaUnitario),
-                String.format("%.2f", subtotal),
-                String.format("%.2f", cotizacion.costoRealUnitario)
+                nombreFila,
+                pedido.cantidadTotalPiezas,
+                String.format("%.2f", precioVentaPromedioUnitario),
+                String.format("%.2f", pedido.totalCliente),
+                String.format("%.2f", pedido.costoMayoristaPromedioUnitario)
             });
 
-            totalGeneral += subtotal;
+            totalGeneral += pedido.totalCliente;
 
-            vista.agregarLogConsola(String.format(
-                    "IMPRESIÓN 3D PEDIDO | Proveedor/U: $%.2f | Base gestión/U: $%.2f | Envío: $%.2f | Cantidad: %d | Total cliente: $%.2f",
-                    cotizacion.precioProveedorUnitario,
-                    cotizacion.precioGestionUnitario,
-                    cotizacion.envioTotal,
-                    cantidad,
-                    cotizacion.totalCliente
-            ));
+            StringBuilder detalleLog = new StringBuilder("IMPRESIÓN 3D PEDIDO | ");
+            for (ItemPedido3D item : pedido.items) {
+                detalleLog.append(String.format("[%s x%d @Proveedor $%.2f] ", item.nombrePieza, item.cantidad, item.precioProveedorUnitario));
+            }
+            detalleLog.append(String.format("| Base gestión/U: $%.2f | Envío: $%.2f | Total cliente: $%.2f",
+                    producto.getPrecio(), pedido.envioTotal, pedido.totalCliente));
+            vista.agregarLogConsola(detalleLog.toString());
 
-        } else if (esPagoFacturas || esNequiMas100 || esNequiMenos100) {
+        } else if (esPagoFacturas || esNequiMas100 || esNequiMenos100 || esDaviplataMas100 || esDaviplataMenos100) {
             String tituloDialogo;
             String etiquetaValorBase;
             if (esPagoFacturas) {
@@ -545,9 +556,15 @@ public class VentasController {
             } else if (esNequiMas100) {
                 tituloDialogo = "Cotización - Recarga Nequi";
                 etiquetaValorBase = "Monto a recargar en Nequi ($):";
-            } else {
+            } else if (esNequiMenos100) {
                 tituloDialogo = "Cotización - Retiro Nequi";
                 etiquetaValorBase = "Monto a retirar de Nequi ($):";
+            } else if (esDaviplataMas100) {
+                tituloDialogo = "Cotización - Recarga Daviplata";
+                etiquetaValorBase = "Monto a recargar en Daviplata ($):";
+            } else {
+                tituloDialogo = "Cotización - Retiro Daviplata";
+                etiquetaValorBase = "Monto a retirar de Daviplata ($):";
             }
 
             CotizacionServicioBase cotizacion = mostrarDialogoServicioConValorBase(
@@ -620,60 +637,71 @@ public class VentasController {
         guardarSesionActual();
     }
 
-    /**
-     * Datos calculados de una cotización de impresión 3D.
-     * precioProveedorUnitario = costo que cobra el proveedor por pieza.
-     * precioGestionUnitario   = Precio Unitario configurado en Excel.
-     * envioTotal              = costo de envío del pedido (si se marcó).
-     * costoRealUnitario       = costo que debe reflejarse como costo mayorista
-     *                           por pieza para calcular la utilidad real.
-     * precioVentaUnitario     = precio que verá el cliente por pieza.
-     * totalCliente            = total de la línea para la cantidad solicitada.
-     */
-    private static class CotizacionImpresion3D {
+
+    /** Una pieza dentro de un pedido múltiple de impresión 3D. */
+    private static class ItemPedido3D {
+        final String nombrePieza;
+        final int cantidad;
         final double precioProveedorUnitario;
         final double precioGestionUnitario;
-        final double envioTotal;
-        final double costoRealUnitario;
-        final double precioVentaUnitario;
-        final double totalCliente;
+        final double subtotalCliente;
 
-        CotizacionImpresion3D(double precioProveedorUnitario,
-                              double precioGestionUnitario,
-                              double envioTotal,
-                              double costoRealUnitario,
-                              double precioVentaUnitario,
-                              double totalCliente) {
+        ItemPedido3D(String nombrePieza, int cantidad, double precioProveedorUnitario, double precioGestionUnitario) {
+            this.nombrePieza = nombrePieza;
+            this.cantidad = cantidad;
             this.precioProveedorUnitario = precioProveedorUnitario;
             this.precioGestionUnitario = precioGestionUnitario;
+            this.subtotalCliente = (precioProveedorUnitario + precioGestionUnitario) * cantidad;
+        }
+    }
+
+    /** Resultado final de un pedido múltiple de impresión 3D ya confirmado. */
+    private static class CotizacionPedido3DMultiple {
+        final List<ItemPedido3D> items;
+        final double envioTotal;
+        final int cantidadTotalPiezas;
+        final double totalCliente;
+        final double costoMayoristaPromedioUnitario;
+
+        CotizacionPedido3DMultiple(List<ItemPedido3D> items, double envioTotal, double totalCliente) {
+            this.items = items;
             this.envioTotal = envioTotal;
-            this.costoRealUnitario = costoRealUnitario;
-            this.precioVentaUnitario = precioVentaUnitario;
             this.totalCliente = totalCliente;
+
+            int cantidad = 0;
+            double costoTotal = envioTotal;
+            for (ItemPedido3D item : items) {
+                cantidad += item.cantidad;
+                costoTotal += item.precioProveedorUnitario * item.cantidad;
+            }
+            this.cantidadTotalPiezas = cantidad;
+            this.costoMayoristaPromedioUnitario = cantidad > 0 ? (costoTotal / cantidad) : 0.0;
+        }
+
+        List<String> nombresPiezas() {
+            List<String> nombres = new ArrayList<>();
+            for (ItemPedido3D item : items) {
+                nombres.add(item.nombrePieza);
+            }
+            return nombres;
         }
     }
 
     /**
-     * Solicita el costo variable del proveedor únicamente para el producto
-     * "impresión 3d pedido".
-     *
-     * Fórmula:
-     *   sin envío: (proveedor por pieza + gestión por pieza) × cantidad
-     *   con envío:  (proveedor por pieza + gestión por pieza) × cantidad + envío
-     *
-     * El envío se interpreta como costo total del pedido y se reparte entre
-     * las piezas para guardar un costo unitario correcto en el carrito.
+     * Cotización y armador del pedido de "impresión 3d pedido": el cajero
+     * puede agregar una o varias piezas (cada una con su propio precio de
+     * proveedor) a la MISMA ventana emergente, y se cobra un solo envío para
+     * todo el pedido. El total final se calcula sumando todas las piezas más
+     * el envío, y todo el pedido se agrega como una sola fila al carrito.
      */
-    private CotizacionImpresion3D mostrarDialogoCostoImpresion3D(
-            String nombreProducto,
-            double precioGestionUnitario,
-            int cantidad) {
+    private CotizacionPedido3DMultiple mostrarDialogoCostoImpresion3D(
+            String nombreProductoReferencia, double precioGestionUnitario, int cantidadInicial) {
 
         final JDialog dialogo = new JDialog(vista,
                 "Cotización - Impresión 3D Pedido",
                 Dialog.ModalityType.APPLICATION_MODAL);
         dialogo.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        dialogo.setSize(470, 390);
+        dialogo.setSize(620, 560);
         dialogo.setLocationRelativeTo(vista);
         dialogo.setResizable(false);
 
@@ -681,190 +709,266 @@ public class VentasController {
         panelPrincipal.setBorder(BorderFactory.createEmptyBorder(15, 18, 12, 18));
         panelPrincipal.setBackground(Color.WHITE);
 
-        JPanel panelForm = new JPanel(new GridBagLayout());
-        panelForm.setOpaque(false);
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 1.0;
-
         JLabel lblTitulo = new JLabel("Cotización de Impresión 3D");
         lblTitulo.setFont(new Font("Segoe UI", Font.BOLD, 18));
         lblTitulo.setForeground(MainFrame.COLOR_OSCURO);
 
-        JLabel lblProducto = new JLabel("Producto: " + nombreProducto);
+        JLabel lblProducto = new JLabel("Producto: " + nombreProductoReferencia);
         lblProducto.setFont(new Font("Segoe UI", Font.PLAIN, 12));
 
-        JLabel lblCantidad = new JLabel("Cantidad solicitada: " + cantidad);
-        lblCantidad.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        JLabel lblGestion = new JLabel(String.format(
+                "Precio Unitario Excel (gestión/ganancia): $%,.2f",
+                precioGestionUnitario));
+        lblGestion.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        lblGestion.setForeground(MainFrame.COLOR_PRIMARIO_DARK);
 
-        JLabel lblPrecioGestion = new JLabel(
-                String.format("Precio Unitario Excel (gestión/ganancia): $%,.2f", precioGestionUnitario));
-        lblPrecioGestion.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        lblPrecioGestion.setForeground(MainFrame.COLOR_PRIMARIO_DARK);
+        JLabel lblAyuda = new JLabel("Agregue una o varias piezas; si son varias, se cobran juntas en un solo pedido.");
+        lblAyuda.setFont(new Font("Segoe UI", Font.ITALIC, 11));
+        lblAyuda.setForeground(new Color(108, 117, 125));
 
-        JTextField txtPrecioProveedor = new JTextField();
-        txtPrecioProveedor.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        txtPrecioProveedor.setToolTipText("Precio que cobra el proveedor por cada pieza");
+        JPanel panelNorte = new JPanel();
+        panelNorte.setLayout(new BoxLayout(panelNorte, BoxLayout.Y_AXIS));
+        panelNorte.setOpaque(false);
+        lblTitulo.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lblProducto.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lblGestion.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lblAyuda.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panelNorte.add(lblTitulo);
+        panelNorte.add(Box.createRigidArea(new Dimension(0, 6)));
+        panelNorte.add(lblProducto);
+        panelNorte.add(Box.createRigidArea(new Dimension(0, 2)));
+        panelNorte.add(lblGestion);
+        panelNorte.add(Box.createRigidArea(new Dimension(0, 4)));
+        panelNorte.add(lblAyuda);
+        panelNorte.add(Box.createRigidArea(new Dimension(0, 8)));
 
-        JCheckBox chkEnvio = new JCheckBox("Cobrar envío");
+        // ----- Formulario para agregar una pieza a la lista -----
+        JPanel panelForm = new JPanel(new GridBagLayout());
+        panelForm.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(4, 4, 4, 4);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        JTextField txtNombrePieza = new JTextField("Pieza 3D");
+        JTextField txtCantidadPieza = new JTextField(String.valueOf(Math.max(1, cantidadInicial)));
+        JTextField txtPrecioProveedorPieza = new JTextField();
+        txtPrecioProveedorPieza.setToolTipText("Precio que cobra el proveedor por cada unidad de esta pieza");
+        JButton btnAgregarPieza = new JButton("Agregar Pieza al Pedido");
+        btnAgregarPieza.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        btnAgregarPieza.setBackground(MainFrame.COLOR_PRIMARIO);
+        btnAgregarPieza.setForeground(Color.WHITE);
+
+        gbc.gridx = 0; gbc.gridy = 0;
+        panelForm.add(new JLabel("Nombre/Pieza:"), gbc);
+        gbc.gridx = 1; gbc.weightx = 1.0;
+        panelForm.add(txtNombrePieza, gbc);
+        gbc.gridx = 2; gbc.weightx = 0;
+        panelForm.add(new JLabel("Cant.:"), gbc);
+        gbc.gridx = 3;
+        txtCantidadPieza.setColumns(4);
+        panelForm.add(txtCantidadPieza, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 1;
+        panelForm.add(new JLabel("Precio proveedor/unidad ($):"), gbc);
+        gbc.gridx = 1; gbc.gridwidth = 1; gbc.weightx = 1.0;
+        panelForm.add(txtPrecioProveedorPieza, gbc);
+        gbc.gridx = 2; gbc.gridwidth = 2; gbc.weightx = 0;
+        panelForm.add(btnAgregarPieza, gbc);
+
+        // ----- Tabla con las piezas ya agregadas al pedido -----
+        String[] columnasTabla = {"Pieza", "Cant.", "Proveedor/U", "Gestión/U", "Subtotal"};
+        DefaultTableModel modeloTablaItems = new DefaultTableModel(columnasTabla, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+        JTable tablaItems = new JTable(modeloTablaItems);
+        tablaItems.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        tablaItems.setRowHeight(22);
+        JScrollPane scrollTabla = new JScrollPane(tablaItems);
+        scrollTabla.setPreferredSize(new Dimension(560, 190));
+
+        JButton btnQuitarPieza = new JButton("Quitar Pieza Seleccionada");
+        btnQuitarPieza.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+
+        // ----- Envío único para todo el pedido -----
+        JCheckBox chkEnvio = new JCheckBox("Cobrar envío del pedido completo");
         chkEnvio.setOpaque(false);
         chkEnvio.setFont(new Font("Segoe UI", Font.BOLD, 12));
-
         JTextField txtEnvio = new JTextField("0");
-        txtEnvio.setFont(new Font("Segoe UI", Font.PLAIN, 13));
         txtEnvio.setEnabled(false);
-        txtEnvio.setToolTipText("Costo total del envío del pedido");
+        txtEnvio.setColumns(10);
 
-        JLabel lblResultado = new JLabel("TOTAL AL CLIENTE: $0,00");
-        lblResultado.setFont(new Font("Segoe UI", Font.BOLD, 17));
+        JPanel panelEnvio = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        panelEnvio.setOpaque(false);
+        panelEnvio.add(chkEnvio);
+        panelEnvio.add(txtEnvio);
+
+        JLabel lblResultado = new JLabel("TOTAL DEL PEDIDO: $0,00");
+        lblResultado.setFont(new Font("Segoe UI", Font.BOLD, 18));
         lblResultado.setForeground(MainFrame.COLOR_EXITO);
 
-        JLabel lblDetalle = new JLabel(" ");
-        lblDetalle.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        lblDetalle.setForeground(MainFrame.COLOR_OSCURO);
+        JPanel panelCentro = new JPanel(new BorderLayout(8, 8));
+        panelCentro.setOpaque(false);
+        panelCentro.add(panelForm, BorderLayout.NORTH);
+        panelCentro.add(scrollTabla, BorderLayout.CENTER);
 
-        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
-        panelForm.add(lblTitulo, gbc);
-        gbc.gridy++;
-        panelForm.add(lblProducto, gbc);
-        gbc.gridy++;
-        panelForm.add(lblCantidad, gbc);
-        gbc.gridy++;
-        panelForm.add(lblPrecioGestion, gbc);
-
-        gbc.gridwidth = 1;
-        gbc.gridy++;
-        gbc.gridx = 0;
-        panelForm.add(new JLabel("Precio del proveedor por pieza ($):"), gbc);
-        gbc.gridx = 1;
-        panelForm.add(txtPrecioProveedor, gbc);
-
-        gbc.gridy++;
-        gbc.gridx = 0;
-        panelForm.add(chkEnvio, gbc);
-        gbc.gridx = 1;
-        panelForm.add(txtEnvio, gbc);
-
-        gbc.gridy++;
-        gbc.gridx = 0; gbc.gridwidth = 2;
-        panelForm.add(lblDetalle, gbc);
-        gbc.gridy++;
-        panelForm.add(lblResultado, gbc);
+        JPanel panelSurCentro = new JPanel();
+        panelSurCentro.setLayout(new BoxLayout(panelSurCentro, BoxLayout.Y_AXIS));
+        panelSurCentro.setOpaque(false);
+        btnQuitarPieza.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panelEnvio.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lblResultado.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panelSurCentro.add(btnQuitarPieza);
+        panelSurCentro.add(panelEnvio);
+        panelSurCentro.add(Box.createRigidArea(new Dimension(0, 6)));
+        panelSurCentro.add(lblResultado);
+        panelCentro.add(panelSurCentro, BorderLayout.SOUTH);
 
         JPanel panelAcciones = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 4));
         panelAcciones.setOpaque(false);
-
         JButton btnCancelar = new JButton("Cancelar");
-        JButton btnAceptar = new JButton("Aceptar");
-        btnAceptar.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        btnAceptar.setBackground(MainFrame.COLOR_EXITO);
-        btnAceptar.setForeground(Color.WHITE);
-        btnAceptar.setFocusPainted(false);
-
+        JButton btnConfirmarPedido = new JButton("Agregar Pedido 3D al Carrito");
+        btnConfirmarPedido.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btnConfirmarPedido.setBackground(MainFrame.COLOR_EXITO);
+        btnConfirmarPedido.setForeground(Color.WHITE);
         panelAcciones.add(btnCancelar);
-        panelAcciones.add(btnAceptar);
+        panelAcciones.add(btnConfirmarPedido);
 
-        panelPrincipal.add(panelForm, BorderLayout.CENTER);
+        panelPrincipal.add(panelNorte, BorderLayout.NORTH);
+        panelPrincipal.add(panelCentro, BorderLayout.CENTER);
         panelPrincipal.add(panelAcciones, BorderLayout.SOUTH);
         dialogo.setContentPane(panelPrincipal);
 
-        final CotizacionImpresion3D[] resultado = new CotizacionImpresion3D[1];
+        final List<ItemPedido3D> itemsPedido = new ArrayList<>();
+        final CotizacionPedido3DMultiple[] resultado = new CotizacionPedido3DMultiple[1];
 
-        Runnable recalcular = () -> {
+        Runnable recalcularTotal = () -> {
+            double envio = 0.0;
             try {
-                double proveedor = parsearMontoFlexible(txtPrecioProveedor.getText());
-                double envio = chkEnvio.isSelected()
-                        ? parsearMontoFlexible(txtEnvio.getText())
-                        : 0.0;
+                envio = chkEnvio.isSelected() ? parsearMontoFlexible(txtEnvio.getText()) : 0.0;
+                if (envio < 0) envio = 0.0;
+            } catch (Exception ignored) {}
 
-                if (proveedor < 0 || envio < 0 || precioGestionUnitario < 0) {
-                    throw new NumberFormatException();
-                }
-
-                double totalSinEnvio = (proveedor + precioGestionUnitario) * cantidad;
-                double totalCliente = redondearAPesosColombianos(totalSinEnvio + envio);
-                double costoRealUnitario = proveedor + (envio / cantidad);
-                double precioVentaUnitario = totalCliente / cantidad;
-
-                lblDetalle.setText(String.format(
-                        "Proveedor/U: $%,.2f  +  Gestión/U: $%,.2f  +  Envío: $%,.2f  =  $%,.0f (redondeado)",
-                        proveedor, precioGestionUnitario, envio, totalCliente));
-                lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.0f", totalCliente));
-                lblResultado.setForeground(MainFrame.COLOR_EXITO);
-            } catch (Exception ex) {
-                lblDetalle.setText("Ingrese un precio de proveedor válido.");
-                lblResultado.setText("TOTAL AL CLIENTE: $0,00");
-                lblResultado.setForeground(MainFrame.COLOR_PELIGRO);
+            double subtotalPiezas = 0.0;
+            for (ItemPedido3D item : itemsPedido) {
+                subtotalPiezas += item.subtotalCliente;
             }
+            double total = redondearAPesosColombianos(subtotalPiezas + envio);
+            lblResultado.setText(String.format("TOTAL DEL PEDIDO: $%,.0f  (%d pieza(s) distintas)", total, itemsPedido.size()));
         };
 
-        DocumentListener recalculoListener = new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { recalcular.run(); }
-            @Override public void removeUpdate(DocumentEvent e) { recalcular.run(); }
-            @Override public void changedUpdate(DocumentEvent e) { recalcular.run(); }
-        };
-        txtPrecioProveedor.getDocument().addDocumentListener(recalculoListener);
-        txtEnvio.getDocument().addDocumentListener(recalculoListener);
         chkEnvio.addActionListener(e -> {
             txtEnvio.setEnabled(chkEnvio.isSelected());
-            if (chkEnvio.isSelected()) {
-                txtEnvio.requestFocus();
-                txtEnvio.selectAll();
+            recalcularTotal.run();
+        });
+        DocumentListener listenerEnvio = new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { recalcularTotal.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { recalcularTotal.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { recalcularTotal.run(); }
+        };
+        txtEnvio.getDocument().addDocumentListener(listenerEnvio);
+
+        btnAgregarPieza.addActionListener(e -> {
+            String nombrePieza = txtNombrePieza.getText().trim();
+            if (nombrePieza.isEmpty()) {
+                JOptionPane.showMessageDialog(dialogo, "Ingrese el nombre de la pieza.", "Dato faltante", JOptionPane.WARNING_MESSAGE);
+                txtNombrePieza.requestFocus();
+                return;
             }
-            recalcular.run();
+
+            int cantidadPieza;
+            double precioProveedorPieza;
+            try {
+                cantidadPieza = Integer.parseInt(txtCantidadPieza.getText().trim());
+                if (cantidadPieza <= 0) throw new NumberFormatException();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialogo, "La cantidad de la pieza debe ser un número mayor a 0.", "Dato inválido", JOptionPane.WARNING_MESSAGE);
+                txtCantidadPieza.requestFocus();
+                return;
+            }
+            try {
+                precioProveedorPieza = parsearMontoFlexible(txtPrecioProveedorPieza.getText());
+                if (precioProveedorPieza < 0) throw new NumberFormatException();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialogo, "Ingrese un precio de proveedor válido para la pieza.", "Dato inválido", JOptionPane.WARNING_MESSAGE);
+                txtPrecioProveedorPieza.requestFocus();
+                return;
+            }
+
+            ItemPedido3D nuevoItem = new ItemPedido3D(nombrePieza, cantidadPieza, precioProveedorPieza, precioGestionUnitario);
+            itemsPedido.add(nuevoItem);
+            modeloTablaItems.addRow(new Object[]{
+                nuevoItem.nombrePieza,
+                nuevoItem.cantidad,
+                String.format("%,.2f", nuevoItem.precioProveedorUnitario),
+                String.format("%,.2f", nuevoItem.precioGestionUnitario),
+                String.format("%,.2f", nuevoItem.subtotalCliente)
+            });
+
+            txtNombrePieza.setText("");
+            txtCantidadPieza.setText("1");
+            txtPrecioProveedorPieza.setText("");
+            txtNombrePieza.requestFocus();
+            recalcularTotal.run();
+        });
+
+        btnQuitarPieza.addActionListener(e -> {
+            int filaSeleccionada = tablaItems.getSelectedRow();
+            if (filaSeleccionada < 0) {
+                JOptionPane.showMessageDialog(dialogo, "Seleccione en la tabla la pieza que desea quitar.", "Aviso", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            itemsPedido.remove(filaSeleccionada);
+            modeloTablaItems.removeRow(filaSeleccionada);
+            recalcularTotal.run();
         });
 
         btnCancelar.addActionListener(e -> dialogo.dispose());
 
-        btnAceptar.addActionListener(e -> {
-            try {
-                double proveedor = parsearMontoFlexible(txtPrecioProveedor.getText());
-                double envio = chkEnvio.isSelected()
-                        ? parsearMontoFlexible(txtEnvio.getText())
-                        : 0.0;
-
-                if (proveedor < 0 || envio < 0 || precioGestionUnitario < 0) {
-                    throw new NumberFormatException();
-                }
-
-                double totalCliente = redondearAPesosColombianos((proveedor + precioGestionUnitario) * cantidad + envio);
-                double costoRealUnitario = proveedor + (envio / cantidad);
-                double precioVentaUnitario = totalCliente / cantidad;
-
-                resultado[0] = new CotizacionImpresion3D(
-                        proveedor,
-                        precioGestionUnitario,
-                        envio,
-                        costoRealUnitario,
-                        precioVentaUnitario,
-                        totalCliente);
-
-                dialogo.dispose();
-            } catch (NumberFormatException ex) {
+        btnConfirmarPedido.addActionListener(e -> {
+            if (itemsPedido.isEmpty()) {
                 JOptionPane.showMessageDialog(dialogo,
-                        "Ingrese valores numéricos válidos para el precio del proveedor"
-                        + (chkEnvio.isSelected() ? " y el envío." : "."),
-                        "Datos inválidos",
+                        "Agregue al menos una pieza al pedido antes de confirmar.",
+                        "Pedido vacío",
                         JOptionPane.WARNING_MESSAGE);
-                txtPrecioProveedor.requestFocus();
+                return;
             }
+
+            double envio;
+            try {
+                envio = chkEnvio.isSelected() ? parsearMontoFlexible(txtEnvio.getText()) : 0.0;
+                if (envio < 0) throw new NumberFormatException();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialogo, "Ingrese un valor de envío válido.", "Dato inválido", JOptionPane.WARNING_MESSAGE);
+                txtEnvio.requestFocus();
+                return;
+            }
+
+            double subtotalPiezas = 0.0;
+            for (ItemPedido3D item : itemsPedido) {
+                subtotalPiezas += item.subtotalCliente;
+            }
+            double totalCliente = redondearAPesosColombianos(subtotalPiezas + envio);
+
+            resultado[0] = new CotizacionPedido3DMultiple(new ArrayList<>(itemsPedido), envio, totalCliente);
+            dialogo.dispose();
         });
 
         dialogo.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowOpened(java.awt.event.WindowEvent e) {
-                txtPrecioProveedor.requestFocus();
+                txtNombrePieza.requestFocus();
             }
         });
 
+        recalcularTotal.run();
         dialogo.setVisible(true);
         return resultado[0];
     }
 
     /**
      * Resultado de una cotización simple de "valor base + comisión fija".
-     * Usado por Pagos de Facturas y Retiros/Recargas Nequi.
+     * Usado por Pagos de Facturas y Retiros/Recargas Nequi y Daviplata.
      */
     private static class CotizacionServicioBase {
         final double valorBase;
@@ -881,8 +985,8 @@ public class VentasController {
     /**
      * Diálogo genérico para servicios donde el cajero digita un valor base
      * distinto cada vez (el valor de una factura, o el monto de una
-     * transacción Nequi) y el sistema le suma la comisión fija configurada
-     * como Precio Unitario en el Excel para ese producto.
+     * transacción Nequi/Daviplata) y el sistema le suma la comisión fija
+     * configurada como Precio Unitario en el Excel para ese producto.
      *
      * Total al cliente = valor base digitado + comisión del Excel.
      */
@@ -1938,14 +2042,16 @@ public class VentasController {
                 ejecutarInstalacionSilenciosaYRelanzar(archivoInstalador, version);
 
             } catch (Exception ex) {
+                String detalleError = ex.getClass().getSimpleName()
+                        + (ex.getMessage() != null ? ": " + ex.getMessage() : "");
                 SwingUtilities.invokeLater(() -> {
                     dialogo.getProgressBar().setIndeterminate(false);
                     dialogo.getProgressBar().setValue(0);
                     dialogo.getLblInfo().setText("<html><center>No se pudo descargar la actualización.<br>"
-                            + "Revise su conexión e intente de nuevo.</center></html>");
+                            + "<b>Detalle:</b> " + detalleError + "</center></html>");
                     dialogo.getBtnAccion().setEnabled(true);
                 });
-                System.err.println("Error al descargar/instalar actualización: " + ex.getMessage());
+                System.err.println("Error al descargar/instalar actualización: " + detalleError);
             }
         }).start();
     }
@@ -2243,10 +2349,184 @@ public class VentasController {
         mostrarVentanaResultadoReporte("Reporte Anual de Ventas - " + anioActual, reporte, "REPORTE VENTAS ANUAL");
     }
 
+    /**
+     * Totales de un período (día, semana o mes) construidos a partir de los
+     * reportes diarios YA EXPORTADOS en disco (Reporte_Ventas_YYYY-MM-DD.txt),
+     * en vez de los acumulados en memoria de la sesión actual. Esto permite
+     * generar el reporte semanal o mensual en cualquier momento posterior
+     * -incluso días después-, siempre que cada día se haya exportado la
+     * venta con el botón "Exportar Venta Día".
+     */
+    private static class ResumenPeriodoExportado {
+        double totalBruto, costoMayorista, pagosEmpleados, efectivo, transferencia;
+        int facturas;
+        int diasConDatos;
+    }
+
+    private double extraerMontoDeLinea(String linea) {
+        try {
+            String sub = linea.substring(linea.indexOf("$") + 1).trim();
+            sub = sub.replaceAll("[^0-9,. ]", "").trim();
+            if (sub.contains(",") && sub.contains(".")) {
+                if (sub.lastIndexOf(",") > sub.lastIndexOf(".")) {
+                    sub = sub.replace(".", "").replace(",", ".");
+                } else {
+                    sub = sub.replace(",", "");
+                }
+            } else if (sub.contains(",")) {
+                sub = sub.replace(",", ".");
+            }
+            return Double.parseDouble(sub);
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    private void sumarResumenDeArchivo(File archivo, ResumenPeriodoExportado acumulado) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(archivo))) {
+            String linea;
+            boolean tieneAlgo = false;
+            while ((linea = reader.readLine()) != null) {
+                if (linea.contains("Total Recaudado Efectivo:")) {
+                    acumulado.efectivo += extraerMontoDeLinea(linea);
+                    tieneAlgo = true;
+                } else if (linea.contains("Total Recaudado Digital:")) {
+                    acumulado.transferencia += extraerMontoDeLinea(linea);
+                } else if (linea.contains("TOTAL INGRESO BRUTO DE VENTA:")) {
+                    acumulado.totalBruto += extraerMontoDeLinea(linea);
+                } else if (linea.contains("COSTO MAYORISTA INVENTARIO:")) {
+                    acumulado.costoMayorista += extraerMontoDeLinea(linea);
+                } else if (linea.contains("TOTAL PAGOS Y NÓMINA:")) {
+                    acumulado.pagosEmpleados += extraerMontoDeLinea(linea);
+                } else if (linea.contains("FACTURAS EXPEDIDAS DEL DÍA:")) {
+                    try {
+                        acumulado.facturas += Integer.parseInt(linea.substring(linea.indexOf(":") + 1).trim());
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            if (tieneAlgo) acumulado.diasConDatos++;
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Suma los reportes diarios exportados dentro del rango [inicio, fin].
+     * Si HOY está dentro del rango y todavía no se ha exportado el día
+     * (no existe su archivo), se completa con los acumulados en memoria de
+     * la sesión actual para no dejar el día en curso por fuera.
+     */
+    private ResumenPeriodoExportado agregarResumenPeriodo(LocalDate inicio, LocalDate fin) {
+        ResumenPeriodoExportado resumen = new ResumenPeriodoExportado();
+
+        File escritorio = FileSystemView.getFileSystemView().getHomeDirectory();
+        File carpetaExportar = new File(new File(new File(escritorio, "DOCUMENTOS SIGLO XXI"), "REPORTES"), "EXPORTAR VENTA DEL DIA");
+
+        LocalDate hoy = LocalDate.now();
+        boolean hoyIncluido = !hoy.isBefore(inicio) && !hoy.isAfter(fin);
+        boolean reporteHoyLeido = false;
+
+        if (carpetaExportar.exists()) {
+            File[] archivos = carpetaExportar.listFiles((dir, name) -> name.startsWith("Reporte_Ventas_") && name.endsWith(".txt"));
+            if (archivos != null) {
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+                for (File archivo : archivos) {
+                    try {
+                        String fechaStr = archivo.getName().replace("Reporte_Ventas_", "").replace(".txt", "");
+                        LocalDate fechaArchivo = LocalDate.parse(fechaStr, formatter);
+                        if (!fechaArchivo.isBefore(inicio) && !fechaArchivo.isAfter(fin)) {
+                            sumarResumenDeArchivo(archivo, resumen);
+                            if (fechaArchivo.equals(hoy)) reporteHoyLeido = true;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+
+        if (hoyIncluido && !reporteHoyLeido && (acumuladoTotalDia > 0 || !registroVentasDelDia.isEmpty())) {
+            resumen.totalBruto += acumuladoTotalDia;
+            resumen.costoMayorista += acumuladoCostoMayoristaDia;
+            resumen.pagosEmpleados += acumuladoPagosEmpleadosDia;
+            resumen.efectivo += acumuladoEfectivo;
+            resumen.transferencia += acumuladoTransferencia;
+            resumen.facturas += registroVentasDelDia.size();
+            resumen.diasConDatos++;
+        }
+
+        return resumen;
+    }
+
+    private static final String PREF_ULTIMA_SEMANA_REPORTADA = "ULTIMA_SEMANA_REPORTADA_INICIO";
+
+    /**
+     * Si hoy es lunes (día en que ya cerró la semana pasada) y hay reportes
+     * diarios exportados de esa semana que todavía no se han resumido en un
+     * Reporte Semanal, lo recuerda al abrir el programa - así no depende de
+     * la memoria de nadie. Se ofrece generarlo ahí mismo con un clic.
+     */
+    private void verificarRecordatorioReporteSemanal() {
+        LocalDate hoy = LocalDate.now();
+        if (hoy.getDayOfWeek() != java.time.DayOfWeek.MONDAY) {
+            return;
+        }
+
+        LocalDate finSemanaPasada = hoy.minusDays(1);
+        LocalDate inicioSemanaPasada = finSemanaPasada.minusDays(6);
+
+        Preferences prefs = Preferences.userNodeForPackage(VentasController.class);
+        String ultimaSemanaReportada = prefs.get(PREF_ULTIMA_SEMANA_REPORTADA, "");
+        if (inicioSemanaPasada.toString().equals(ultimaSemanaReportada)) {
+            return; // ya se generó el reporte de esa semana
+        }
+
+        ResumenPeriodoExportado resumen = agregarResumenPeriodo(inicioSemanaPasada, finSemanaPasada);
+        if (resumen.diasConDatos == 0) {
+            return; // no hubo ventas exportadas esa semana, nada que recordar
+        }
+
+        int opcion = JOptionPane.showConfirmDialog(vista,
+                "Hoy es lunes y la semana pasada (" + inicioSemanaPasada.format(DateTimeFormatter.ofPattern("dd/MM"))
+                + " al " + finSemanaPasada.format(DateTimeFormatter.ofPattern("dd/MM")) + ") tuvo ventas exportadas,\n"
+                + "pero todavía no se ha generado su Reporte Semanal.\n\n"
+                + "¿Desea generarlo ahora?",
+                "Recordatorio: Reporte Semanal Pendiente",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.INFORMATION_MESSAGE);
+
+        if (opcion == JOptionPane.YES_OPTION) {
+            generarReporteSemanalParaFecha(finSemanaPasada);
+        }
+
+        // Se marca como "recordada" de todas formas (haya dicho que sí o no),
+        // para no insistir varias veces el mismo lunes.
+        prefs.put(PREF_ULTIMA_SEMANA_REPORTADA, inicioSemanaPasada.toString());
+    }
+
     private void generarReporteMensual() {
-        String mesAnio = LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM yyyy")).toUpperCase();
-        double gananciaNeta = acumuladoTotalDia - acumuladoCostoMayoristaDia - acumuladoPagosEmpleadosDia;
-        double margenUtilidad = (acumuladoTotalDia > 0) ? (gananciaNeta / acumuladoTotalDia) * 100.0 : 0.0;
+        Date fechaInicial = java.sql.Date.valueOf(LocalDate.now());
+        MainFrame.DialogoSelectorFecha selector = vista.new DialogoSelectorFecha(vista, fechaInicial);
+        selector.setTitle("Elija un día dentro del MES que quiere reportar");
+        selector.setVisible(true);
+        if (!selector.isConfirmado()) {
+            return;
+        }
+
+        LocalDate fechaRef = selector.getFechaSeleccionada().toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate inicioMes = fechaRef.withDayOfMonth(1);
+        LocalDate finMes = fechaRef.withDayOfMonth(fechaRef.lengthOfMonth());
+        String mesAnio = fechaRef.format(DateTimeFormatter.ofPattern("MMMM yyyy")).toUpperCase();
+
+        ResumenPeriodoExportado resumen = agregarResumenPeriodo(inicioMes, finMes);
+
+        if (resumen.diasConDatos == 0) {
+            JOptionPane.showMessageDialog(vista,
+                    "No se encontraron reportes diarios exportados para " + mesAnio + ".\n\n"
+                    + "Recuerde usar 'Exportar Venta Día' cada noche antes de cerrar,\n"
+                    + "así este reporte siempre podrá reconstruirse aunque pasen varios días.",
+                    "Sin datos para ese mes", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        double gananciaNeta = resumen.totalBruto - resumen.costoMayorista - resumen.pagosEmpleados;
+        double margenUtilidad = (resumen.totalBruto > 0) ? (gananciaNeta / resumen.totalBruto) * 100.0 : 0.0;
         String fechaHoraEmision = LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")) + " " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
 
         String reporte = String.format("""
@@ -2254,7 +2534,7 @@ public class VentasController {
                                       PAPELERÍA SIGLO XXI                           
                            REPORTE MENSUAL DE RENDIMIENTO DE VENTAS                  
                 ====================================================================
-                PERÍODO EVALUADO    : %s
+                PERÍODO EVALUADO    : %s (días con datos: %d de %d)
                 FECHA DE EMISIÓN    : %s
                 RESPONSABLE         : %s
                 ====================================================================
@@ -2280,31 +2560,56 @@ public class VentasController {
                    • Total Efectivo en Caja      : $%,14.2f
                    • Total Medios Digitales      : $%,14.2f
                 ====================================================================
-                                 DOCUMENTO OFICIAL DE CONTROL INTERNO               
+                        RECONSTRUIDO A PARTIR DE LOS REPORTES DIARIOS EXPORTADOS      
                 ====================================================================
                 """,
-            mesAnio, fechaHoraEmision, this.nombreEmpleado.toUpperCase(),
-            (contadorFacturas - 1), acumuladoTotalDia,
-            acumuladoCostoMayoristaDia, acumuladoPagosEmpleadosDia, (acumuladoCostoMayoristaDia + acumuladoPagosEmpleadosDia),
-            gananciaNeta, margenUtilidad, acumuladoEfectivo, acumuladoTransferencia
+            mesAnio, resumen.diasConDatos, finMes.getDayOfMonth(), fechaHoraEmision, this.nombreEmpleado.toUpperCase(),
+            resumen.facturas, resumen.totalBruto,
+            resumen.costoMayorista, resumen.pagosEmpleados, (resumen.costoMayorista + resumen.pagosEmpleados),
+            gananciaNeta, margenUtilidad, resumen.efectivo, resumen.transferencia
         );
 
         mostrarVentanaResultadoReporte("Reporte Mensual de Ventas - " + mesAnio, reporte, "REPORTE VENTAS MENSUAL");
     }
 
     private void generarReporteSemanal() {
-        LocalDate hoy = LocalDate.now();
-        LocalDate inicioSemana = hoy.minusDays(hoy.getDayOfWeek().getValue() - 1);
-        double gananciaNeta = acumuladoTotalDia - acumuladoCostoMayoristaDia - acumuladoPagosEmpleadosDia;
-        double margenUtilidad = (acumuladoTotalDia > 0) ? (gananciaNeta / acumuladoTotalDia) * 100.0 : 0.0;
-        String fechaHoraEmision = hoy.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")) + " " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        Date fechaInicial = java.sql.Date.valueOf(LocalDate.now());
+        MainFrame.DialogoSelectorFecha selector = vista.new DialogoSelectorFecha(vista, fechaInicial);
+        selector.setTitle("Elija un día dentro de la SEMANA que quiere reportar");
+        selector.setVisible(true);
+        if (!selector.isConfirmado()) {
+            return;
+        }
+
+        LocalDate fechaRef = selector.getFechaSeleccionada().toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        generarReporteSemanalParaFecha(fechaRef);
+    }
+
+    private void generarReporteSemanalParaFecha(LocalDate fechaRef) {
+        LocalDate inicioSemana = fechaRef.minusDays(fechaRef.getDayOfWeek().getValue() - 1);
+        LocalDate finSemana = inicioSemana.plusDays(6);
+
+        ResumenPeriodoExportado resumen = agregarResumenPeriodo(inicioSemana, finSemana);
+
+        if (resumen.diasConDatos == 0) {
+            JOptionPane.showMessageDialog(vista,
+                    "No se encontraron reportes diarios exportados para esa semana.\n\n"
+                    + "Recuerde usar 'Exportar Venta Día' cada noche antes de cerrar,\n"
+                    + "así este reporte siempre podrá reconstruirse aunque pasen varios días.",
+                    "Sin datos para esa semana", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        double gananciaNeta = resumen.totalBruto - resumen.costoMayorista - resumen.pagosEmpleados;
+        double margenUtilidad = (resumen.totalBruto > 0) ? (gananciaNeta / resumen.totalBruto) * 100.0 : 0.0;
+        String fechaHoraEmision = LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")) + " " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
 
         String reporte = String.format("""
                 ====================================================================
                                       PAPELERÍA SIGLO XXI                           
                            REPORTE SEMANAL DE INVENTARIO Y VENTAS                    
                 ====================================================================
-                RANGO DE FECHAS     : Del %s al %s
+                RANGO DE FECHAS     : Del %s al %s (días con datos: %d de 7)
                 FECHA DE EMISIÓN    : %s
                 ATENDIDO POR        : %s
                 ====================================================================
@@ -2330,19 +2635,20 @@ public class VentasController {
                    • Recaudo Efectivo            : $%,14.2f
                    • Recaudo Transferencia       : $%,14.2f
                 ====================================================================
-                                 DOCUMENTO OFICIAL DE CONTROL INTERNO               
+                        RECONSTRUIDO A PARTIR DE LOS REPORTES DIARIOS EXPORTADOS      
                 ====================================================================
                 """,
             inicioSemana.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
-            hoy.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
-            fechaHoraEmision, this.nombreEmpleado.toUpperCase(),
-            (contadorFacturas - 1), acumuladoTotalDia,
-            acumuladoCostoMayoristaDia, acumuladoPagosEmpleadosDia, (acumuladoCostoMayoristaDia + acumuladoPagosEmpleadosDia),
-            gananciaNeta, margenUtilidad, acumuladoEfectivo, acumuladoTransferencia
+            finSemana.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+            resumen.diasConDatos, fechaHoraEmision, this.nombreEmpleado.toUpperCase(),
+            resumen.facturas, resumen.totalBruto,
+            resumen.costoMayorista, resumen.pagosEmpleados, (resumen.costoMayorista + resumen.pagosEmpleados),
+            gananciaNeta, margenUtilidad, resumen.efectivo, resumen.transferencia
         );
 
         mostrarVentanaResultadoReporte("Reporte Semanal de Ventas", reporte, "REPORTE VENTAS SEMANAL");
     }
+
 
     private void generarReportePromedioDiario() {
         int totalTransacciones = contadorFacturas - 1;
@@ -2572,6 +2878,7 @@ public class VentasController {
             writer.println(" 1. REGISTRO DETALLADO DE TRANSACCIONES DE VENTA");
             writer.println("------------------------------------------------------------------");
             for (String venta : registroVentasDelDia) writer.println(venta);
+            writer.println(" FACTURAS EXPEDIDAS DEL DÍA: " + registroVentasDelDia.size());
 
             if (!registroPagosEmpleadosDia.isEmpty()) {
                 writer.println("------------------------------------------------------------------");
@@ -2683,18 +2990,12 @@ public class VentasController {
         panelVersion.add(lblVersion);
         panelVersion.add(btnBuscarUpdates);
 
-        JLabel lblModo = new JLabel(" Modo de ejecución: " + (modeloInventario.isModoPruebas() ? "PRUEBAS (En desarrollo)" : "PRODUCCIÓN"));
-        lblModo.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        lblModo.setAlignmentX(Component.LEFT_ALIGNMENT);
-
         JLabel lblRutaBD = new JLabel("<html><b>📁 Archivo Excel en uso:</b><br>" + rutaExcel + "</html>");
         lblRutaBD.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         lblRutaBD.setForeground(new Color(40, 116, 166));
         lblRutaBD.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         panelInfo.add(panelVersion);
-        panelInfo.add(Box.createRigidArea(new Dimension(0, 10)));
-        panelInfo.add(lblModo);
         panelInfo.add(Box.createRigidArea(new Dimension(0, 10)));
         panelInfo.add(lblRutaBD);
 

@@ -9,8 +9,6 @@ import sigloxxi.ventaspapeleria.vista.MainFrame;
 
 public final class VentasPapeleria {
 
-    private static final boolean MODO_PRUEBAS = true;
-
     private VentasPapeleria() {
         // Clase de arranque: no se instancia.
     }
@@ -43,8 +41,8 @@ public final class VentasPapeleria {
                 String nombreValido = empleado.isEmpty() ? "MIGUEL" : empleado;
 
                 // Inicialización de Arquitectura MVC
-                InventarioModelo modelo = new InventarioModelo(MODO_PRUEBAS);
-                MainFrame vista = new MainFrame(nombreValido, modelo.isModoPruebas());
+                InventarioModelo modelo = new InventarioModelo();
+                MainFrame vista = new MainFrame(nombreValido);
                 new VentasController(vista, modelo, nombreValido);
 
                 vista.setVisible(true);

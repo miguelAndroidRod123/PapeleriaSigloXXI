@@ -125,21 +125,19 @@ public class MainFrame extends JFrame {
     private boolean inventarioConectado = false;
     private boolean parpadeoEncendido = true;
     private String nombreEmpleadoActivo = "SIN ASIGNAR";
-    private boolean modoPruebas = true;
 
     // =========================================================================
     // CONSTRUCTORES PRINCIPALES
     // =========================================================================
     /** Constructor sin argumentos conservado para compatibilidad con NetBeans. */
     public MainFrame() {
-        this("SIN ASIGNAR", true);
+        this("SIN ASIGNAR");
     }
 
     /** Constructor utilizado por el controlador principal MVC. */
-    public MainFrame(String nombreEmpleado, boolean modoPruebas) {
+    public MainFrame(String nombreEmpleado) {
         super("Papelería Siglo XXI - Sistema Profesional de Control de Ventas e Inventario");
         this.nombreEmpleadoActivo = (nombreEmpleado == null || nombreEmpleado.isBlank()) ? "SIN ASIGNAR" : nombreEmpleado.trim();
-        this.modoPruebas = modoPruebas;
 
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1180, 760);
@@ -177,8 +175,7 @@ public class MainFrame extends JFrame {
     }
 
     private void actualizarTituloVentana() {
-        String sufijoModo = modoPruebas ? " [MODO PRUEBAS]" : "";
-        setTitle("Papelería Siglo XXI - POS | Empleado: " + nombreEmpleadoActivo.toUpperCase() + sufijoModo);
+        setTitle("Papelería Siglo XXI - POS | Empleado: " + nombreEmpleadoActivo.toUpperCase());
     }
 
     // =========================================================================
@@ -566,8 +563,7 @@ public class MainFrame extends JFrame {
         if (lblEstadoSistema != null) {
             String base = conectado ? "Inventario Excel: CONECTADO" : "Inventario Excel: DESCONECTADO";
             String sufijoDetalle = (detalle != null && !detalle.isBlank()) ? " (" + detalle + ")" : "";
-            String sufijoModo = " | " + (modoPruebas ? "MODO PRUEBAS" : "PRODUCCIÓN");
-            lblEstadoSistema.setText(base + sufijoDetalle + sufijoModo);
+            lblEstadoSistema.setText(base + sufijoDetalle);
         }
     }
 
@@ -964,7 +960,6 @@ public class MainFrame extends JFrame {
     public JLabel getLblEstadoProducto() { return lblEstadoProducto; }
 
     public String getNombreEmpleadoActivo() { return nombreEmpleadoActivo; }
-    public boolean isModoPruebas() { return modoPruebas; }
 
     // =========================================================================
     // RENDERIZADOR PERSONALIZADO PARA TABLA DE VENTAS
