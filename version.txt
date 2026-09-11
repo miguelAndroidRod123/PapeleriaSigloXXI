@@ -1,2 +1,2 @@
-V1.4.2
-https://github.com/miguelAndroidRod123/PapeleriaSigloXXI/releases/download/V1.4.2/Instalador_PapeleriaSigloXXI_v1.4.2.exe
+V1.5.0
+https://github.com/miguelAndroidRod123/PapeleriaSigloXXI/releases/download/v1.5.0/Instalador_PapeleriaSigloXXI_v1.5.0.exe
