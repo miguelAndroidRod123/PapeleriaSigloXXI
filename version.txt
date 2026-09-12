@@ -1,2 +1,2 @@
-V1.5.0
-https://github.com/miguelAndroidRod123/PapeleriaSigloXXI/releases/download/v1.5.0/Instalador_PapeleriaSigloXXI_v1.5.0.exe
+V1.5.1
+https://github.com/miguelAndroidRod123/PapeleriaSigloXXI/releases/download/V1.5.1/Instalador_PapeleriaSigloXXI_v1.5.1.exe
