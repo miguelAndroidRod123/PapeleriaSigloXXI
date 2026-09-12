@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.List;
+import java.util.prefs.Preferences;
 
 /**
  * Vista Principal del Sistema de Control de Ventas e Inventario - Papelería Siglo XXI.
@@ -33,6 +34,15 @@ public class MainFrame extends JFrame {
     public static final String RUTA_IMAGENES = "imagenes/";
     public static final String RUTA_ICONOS = RUTA_IMAGENES + "ICONOS/";
     public static final String RUTA_DINERO = RUTA_IMAGENES + "IMAGENES-DINERO/";
+
+    /**
+     * ÚNICA fuente de verdad de la versión del software. Se actualiza en
+     * este solo lugar con cada release; tanto el diálogo "Acerca de" como
+     * el Centro de Actualizaciones, el reporte de ventas y el chequeo de
+     * actualizaciones (VentasController) la leen de aquí para que nunca
+     * queden desincronizados entre sí.
+     */
+    public static final String VERSION_SOFTWARE = "v1.5.0";
 
     // =========================================================================
     // PALETA DE COLORES CORPORATIVA Y ESTILOS DE INTERFAZ
@@ -101,6 +111,14 @@ public class MainFrame extends JFrame {
     private JTextArea txtConsolaVentas;
     private JScrollPane scrollConsola;
     private JButton btnBorrarLog;
+    private JCheckBox chkOcultarMontosConsola;
+    private boolean modoPrivadoConsola = false;
+    private final List<String> historialConsola = new ArrayList<>();
+    private static final String PREF_MODO_PRIVADO_CONSOLA = "MODO_PRIVADO_CONSOLA";
+    // Detecta montos en pesos dentro de una línea de log (ej: "$2.200,00",
+    // "$500", "$ 90000,00") para poder taparlos sin tocar el resto del texto.
+    private static final java.util.regex.Pattern PATRON_MONTO_DINERO =
+            java.util.regex.Pattern.compile("\\$\\s?[0-9][0-9.,]*");
 
     // =========================================================================
     // COMPONENTES DE PANEL INFERIOR Y LIQUIDACIÓN
@@ -231,7 +249,7 @@ public class MainFrame extends JFrame {
                 "Borrar el historial visible en pantalla",
                 20, 20,
                 "limpiar", "borrar", "clear", "consola");
-        itemLimpiarConsola.addActionListener(e -> txtConsolaVentas.setText(""));
+        itemLimpiarConsola.addActionListener(e -> limpiarConsola());
         menuHerramientas.add(itemLimpiarConsola);
 
         // Menú Ayuda
@@ -446,8 +464,34 @@ public class MainFrame extends JFrame {
                 TitledBorder.LEFT, TitledBorder.TOP, FUENTE_SUBTITULO, COLOR_OSCURO
         ));
 
+        chkOcultarMontosConsola = new JCheckBox("Ocultar montos ($) en este registro");
+        chkOcultarMontosConsola.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        chkOcultarMontosConsola.setForeground(COLOR_OSCURO);
+        chkOcultarMontosConsola.setOpaque(false);
+        chkOcultarMontosConsola.setToolTipText(
+                "Actívelo si esta pantalla se está proyectando o duplicando en otro"
+                + " monitor a la vista de clientes: tapa únicamente las cifras en $"
+                + " del registro, el resto del texto se sigue viendo igual.");
+        Preferences prefsConsola = Preferences.userNodeForPackage(MainFrame.class);
+        modoPrivadoConsola = prefsConsola.getBoolean(PREF_MODO_PRIVADO_CONSOLA, false);
+        chkOcultarMontosConsola.setSelected(modoPrivadoConsola);
+        chkOcultarMontosConsola.addActionListener(e -> {
+            modoPrivadoConsola = chkOcultarMontosConsola.isSelected();
+            Preferences.userNodeForPackage(MainFrame.class).putBoolean(PREF_MODO_PRIVADO_CONSOLA, modoPrivadoConsola);
+            reconstruirConsolaSegunModoActual();
+        });
+
+        JPanel panelBarraConsola = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 2));
+        panelBarraConsola.setOpaque(false);
+        panelBarraConsola.add(chkOcultarMontosConsola);
+
+        JPanel panelConsolaContenedor = new JPanel(new BorderLayout());
+        panelConsolaContenedor.setOpaque(false);
+        panelConsolaContenedor.add(panelBarraConsola, BorderLayout.NORTH);
+        panelConsolaContenedor.add(scrollConsola, BorderLayout.CENTER);
+
         splitCentro.setTopComponent(scrollTabla);
-        splitCentro.setBottomComponent(scrollConsola);
+        splitCentro.setBottomComponent(panelConsolaContenedor);
 
         return splitCentro;
     }
@@ -915,7 +959,43 @@ public class MainFrame extends JFrame {
     public void agregarLogConsola(String mensaje) {
         SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
         String hora = sdf.format(new Date());
-        txtConsolaVentas.append("[" + hora + "] " + mensaje + "\n");
+        String linea = "• [" + hora + "] " + mensaje;
+        historialConsola.add(linea);
+        txtConsolaVentas.append(formatearLineaConsola(linea) + "\n");
+        txtConsolaVentas.setCaretPosition(txtConsolaVentas.getDocument().getLength());
+    }
+
+    /**
+     * Borra la consola Y su historial interno juntos. Úsese siempre en vez de
+     * llamar a getTxtConsolaVentas().setText("") directamente: si solo se
+     * borra el texto visible pero no el historial, al activar/desactivar
+     * "Ocultar montos" la consola se repuebla sola con lo que se creía borrado.
+     */
+    public void limpiarConsola() {
+        txtConsolaVentas.setText("");
+        historialConsola.clear();
+    }
+
+    /**
+     * Aplica (o no) el tapado de montos en $ a una línea del historial, según
+     * el estado actual del checkbox "Ocultar montos". El monto se reemplaza
+     * por un marcador de longitud fija para que tampoco se pueda adivinar la
+     * cifra por la cantidad de dígitos tapados.
+     */
+    private String formatearLineaConsola(String linea) {
+        if (!modoPrivadoConsola) {
+            return linea;
+        }
+        return PATRON_MONTO_DINERO.matcher(linea).replaceAll("\\$ ••••••");
+    }
+
+    /** Vuelve a pintar toda la consola desde el historial guardado, aplicando el modo privado actual. */
+    private void reconstruirConsolaSegunModoActual() {
+        StringBuilder textoReconstruido = new StringBuilder();
+        for (String linea : historialConsola) {
+            textoReconstruido.append(formatearLineaConsola(linea)).append("\n");
+        }
+        txtConsolaVentas.setText(textoReconstruido.toString());
         txtConsolaVentas.setCaretPosition(txtConsolaVentas.getDocument().getLength());
     }
 
@@ -925,11 +1005,14 @@ public class MainFrame extends JFrame {
     }
 
     private void mostrarAcercaDe() {
+        String versionSinPrefijo = VERSION_SOFTWARE.replaceFirst("^[vV]", "");
+        int anioActual = LocalDate.now().getYear();
+
         String mensaje =
                 "Papelería Siglo XXI - POS & Inventory System\n" +
-                "Versión 3.5.0 Enterprise Edition\n" +
+                "Versión " + versionSinPrefijo + "\n" +
                 "Desarrollado para Control Operativo y Facturación Diaria\n\n" +
-                "© 2026 Todos los derechos reservados.";
+                "© " + anioActual + " Todos los derechos reservados.";
 
         String rutaIcono = buscarRutaIconoPorPalabras("acerca", "about", "informacion", "info", "siglo");
         ImageIcon icono = rutaIcono != null ? cargarIcono(rutaIcono, 56, 56) : null;

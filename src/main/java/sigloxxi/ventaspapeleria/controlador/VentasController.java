@@ -40,7 +40,9 @@ public class VentasController {
     private final InventarioModelo modeloInventario;
     private final String nombreEmpleado;
 
-    private static final String VERSION_SOFTWARE = "v1.4.2";
+    // La versión del software vive en MainFrame.VERSION_SOFTWARE (única
+    // fuente de verdad); aquí solo se referencia para no tener dos lugares
+    // que actualizar en cada release.
 
     // Valor de referencia de la hora ordinaria legal en Colombia (SMMLV 2026
     // dividido entre 210 horas mensuales, jornada de 42h vigente desde el
@@ -385,8 +387,8 @@ public class VentasController {
 
         vista.getLblTotal().setText(String.format("TOTAL: $%.2f", totalGeneral));
         if (!registroVentasDelDia.isEmpty()) {
-            vista.getTxtConsolaVentas().append("• Sesión recuperada: " + registroVentasDelDia.size()
-                    + " venta(s) del día restauradas desde el respaldo.\n");
+            vista.agregarLogConsola("Sesión recuperada: " + registroVentasDelDia.size()
+                    + " venta(s) del día restauradas desde el respaldo.");
         }
     }
 
@@ -456,10 +458,30 @@ public class VentasController {
         }
 
         List<Producto> coincidencias = modeloInventario.buscarEnExcel(busqueda, vista);
-        Producto producto = elegirProductoDeLista(coincidencias, busqueda);
-
-        if (producto == null) {
+        if (coincidencias.isEmpty()) {
+            JOptionPane.showMessageDialog(vista, "No se encontró ningún producto que coincida con: '" + busqueda + "'.", "Sin resultados", JOptionPane.WARNING_MESSAGE);
             return;
+        }
+
+        // Si TODAS las coincidencias son franjas del mismo servicio por rango
+        // (ej: buscó "pagos de facturas" y salieron las 3 franjas: 200/500/1M),
+        // no se le pide al cajero que elija una franja a ciegas: se sigue de
+        // una vez al diálogo de monto, y el sistema elige sola la franja
+        // correcta según lo que el cajero digite.
+        String grupoRango = detectarGrupoComunPorRango(coincidencias);
+
+        Producto producto;
+        if (grupoRango != null) {
+            producto = coincidencias.get(0);
+        } else {
+            producto = elegirProductoDeLista(coincidencias, busqueda);
+            if (producto == null) {
+                return;
+            }
+            // Si la búsqueda fue lo bastante específica para traer una sola
+            // franja (ej: buscó el código exacto de "RETIROS / RECARGAS
+            // NEQUI +100"), igual se reconoce como servicio por rango.
+            grupoRango = detectarGrupoPorRango(producto.getNombre());
         }
 
         if (producto.getPrecio() <= 0) {
@@ -499,13 +521,6 @@ public class VentasController {
         // usuario marca la casilla correspondiente.
         boolean esImpresion3DPedido = "impresión 3d pedido".equalsIgnoreCase(
                 producto.getNombre() == null ? "" : producto.getNombre().trim());
-
-        String nombreProductoLimpio = producto.getNombre() == null ? "" : producto.getNombre().trim();
-        boolean esPagoFacturas = "pagos de facturas".equalsIgnoreCase(nombreProductoLimpio);
-        boolean esNequiMas100 = "retiros / recargas nequi +100".equalsIgnoreCase(nombreProductoLimpio);
-        boolean esNequiMenos100 = "retiros / recargas nequi -100".equalsIgnoreCase(nombreProductoLimpio);
-        boolean esDaviplataMas100 = "retiros / recargas daviplata +100".equalsIgnoreCase(nombreProductoLimpio);
-        boolean esDaviplataMenos100 = "retiros / recargas daviplata -100".equalsIgnoreCase(nombreProductoLimpio);
 
         if (esImpresion3DPedido) {
             CotizacionPedido3DMultiple pedido = mostrarDialogoCostoImpresion3D(
@@ -547,51 +562,53 @@ public class VentasController {
                     producto.getPrecio(), pedido.envioTotal, pedido.totalCliente));
             vista.agregarLogConsola(detalleLog.toString());
 
-        } else if (esPagoFacturas || esNequiMas100 || esNequiMenos100 || esDaviplataMas100 || esDaviplataMenos100) {
+        } else if (grupoRango != null) {
             String tituloDialogo;
             String etiquetaValorBase;
-            if (esPagoFacturas) {
+            if (grupoRango.equals(PREFIJO_PAGO_FACTURAS)) {
                 tituloDialogo = "Cotización - Pago de Factura";
                 etiquetaValorBase = "Valor de la factura pagada ($):";
-            } else if (esNequiMas100) {
-                tituloDialogo = "Cotización - Recarga Nequi";
-                etiquetaValorBase = "Monto a recargar en Nequi ($):";
-            } else if (esNequiMenos100) {
-                tituloDialogo = "Cotización - Retiro Nequi";
-                etiquetaValorBase = "Monto a retirar de Nequi ($):";
-            } else if (esDaviplataMas100) {
-                tituloDialogo = "Cotización - Recarga Daviplata";
-                etiquetaValorBase = "Monto a recargar en Daviplata ($):";
+            } else if (grupoRango.equals(PREFIJO_NEQUI)) {
+                tituloDialogo = "Cotización - Transacción Nequi";
+                etiquetaValorBase = "Monto de la transacción en Nequi ($):";
             } else {
-                tituloDialogo = "Cotización - Retiro Daviplata";
-                etiquetaValorBase = "Monto a retirar de Daviplata ($):";
+                tituloDialogo = "Cotización - Transacción Daviplata";
+                etiquetaValorBase = "Monto de la transacción en Daviplata ($):";
             }
 
-            CotizacionServicioBase cotizacion = mostrarDialogoServicioConValorBase(
-                    tituloDialogo, producto.getNombre(), etiquetaValorBase, producto.getPrecio());
+            // Se traen TODAS las franjas del grupo (no solo la que haya
+            // quedado seleccionada), para que el diálogo pueda elegir sola
+            // la que corresponda según el monto que el cajero digite.
+            List<Producto> franjas = modeloInventario.buscarEnExcel(grupoRango, vista);
+
+            CotizacionServicioPorRango cotizacion = mostrarDialogoServicioPorRango(
+                    tituloDialogo, etiquetaValorBase, franjas);
 
             if (cotizacion == null) {
-                // El usuario canceló: no se agrega nada al carrito.
+                // El usuario canceló, o ningún rango cubría el monto digitado.
                 return;
             }
+
+            Producto franjaAplicada = cotizacion.franjaAplicada;
 
             // Cada pago/retiro/recarga es una transacción única: se agrega
             // siempre como una fila nueva con cantidad 1, sin importar lo que
             // se haya escrito en el campo "Cantidad" de la búsqueda.
             vista.getModeloTabla().addRow(new Object[]{
-                producto.getCodigo(),
-                producto.getNombre(),
+                franjaAplicada.getCodigo(),
+                franjaAplicada.getNombre(),
                 1,
                 String.format("%.2f", cotizacion.totalCliente),
                 String.format("%.2f", cotizacion.totalCliente),
-                String.format("%.2f", producto.getCostoMayorista())
+                String.format("%.2f", franjaAplicada.getCostoMayorista())
             });
 
             totalGeneral += cotizacion.totalCliente;
 
             vista.agregarLogConsola(String.format(
-                    "%s | Valor base: $%.2f | Comisión: $%.2f | Total cliente: $%.2f",
-                    producto.getNombre(), cotizacion.valorBase, cotizacion.comision, cotizacion.totalCliente
+                    "%s | Valor base: $%.2f | Comisión (%s): $%.2f | Total cliente: $%.2f",
+                    franjaAplicada.getNombre(), cotizacion.valorBase, franjaAplicada.getCodigo(),
+                    cotizacion.comision, cotizacion.totalCliente
             ));
 
         } else {
@@ -967,35 +984,77 @@ public class VentasController {
     }
 
     /**
-     * Resultado de una cotización simple de "valor base + comisión fija".
-     * Usado por Pagos de Facturas y Retiros/Recargas Nequi y Daviplata.
+     * Prefijos (en minúsculas) que agrupan las filas-franja de cada servicio
+     * por rango en el Excel. Cualquier producto cuyo nombre EMPIECE con uno
+     * de estos prefijos pertenece a ese grupo, sin importar el sufijo que
+     * cada franja tenga después (200/500/1M, -100/+100/+500, etc.).
      */
-    private static class CotizacionServicioBase {
+    private static final String PREFIJO_PAGO_FACTURAS = "pagos de facturas";
+    private static final String PREFIJO_NEQUI = "retiros / recargas nequi";
+    private static final String PREFIJO_DAVIPLATA = "retiros / recargas daviplata";
+    private static final String[] PREFIJOS_SERVICIO_POR_RANGO = {
+        PREFIJO_PAGO_FACTURAS, PREFIJO_NEQUI, PREFIJO_DAVIPLATA
+    };
+
+    /** Si el nombre del producto pertenece a un grupo de servicio por rango, devuelve su prefijo; si no, null. */
+    private String detectarGrupoPorRango(String nombreProducto) {
+        String nombreLimpio = (nombreProducto == null ? "" : nombreProducto.trim()).toLowerCase(java.util.Locale.ROOT);
+        for (String prefijo : PREFIJOS_SERVICIO_POR_RANGO) {
+            if (nombreLimpio.startsWith(prefijo)) {
+                return prefijo;
+            }
+        }
+        return null;
+    }
+
+    /** Si TODAS las coincidencias de la búsqueda pertenecen al mismo grupo por rango, devuelve ese prefijo; si no, null. */
+    private String detectarGrupoComunPorRango(List<Producto> coincidencias) {
+        if (coincidencias.isEmpty()) return null;
+        String grupo = detectarGrupoPorRango(coincidencias.get(0).getNombre());
+        if (grupo == null) return null;
+        for (Producto p : coincidencias) {
+            if (!grupo.equals(detectarGrupoPorRango(p.getNombre()))) {
+                return null;
+            }
+        }
+        return grupo;
+    }
+
+    /**
+     * Resultado de una cotización por franjas: cuál de las filas-franja del
+     * Excel aplicó según el monto digitado, y el total ya calculado.
+     */
+    private static class CotizacionServicioPorRango {
         final double valorBase;
         final double comision;
         final double totalCliente;
+        final Producto franjaAplicada;
 
-        CotizacionServicioBase(double valorBase, double comision, double totalCliente) {
+        CotizacionServicioPorRango(double valorBase, double comision, double totalCliente, Producto franjaAplicada) {
             this.valorBase = valorBase;
             this.comision = comision;
             this.totalCliente = totalCliente;
+            this.franjaAplicada = franjaAplicada;
         }
     }
 
     /**
      * Diálogo genérico para servicios donde el cajero digita un valor base
      * distinto cada vez (el valor de una factura, o el monto de una
-     * transacción Nequi/Daviplata) y el sistema le suma la comisión fija
-     * configurada como Precio Unitario en el Excel para ese producto.
+     * transacción Nequi/Daviplata) y la comisión depende de en qué franja
+     * caiga ese monto. Cada franja es una fila de producto normal en el
+     * Excel (ej: "PAGOS DE FACTURAS 200" con Monto Mínimo/Máximo $0-$200.000
+     * y Precio Unitario $500); aquí simplemente se recorren todas las
+     * franjas del grupo y se usa la que cubra el monto digitado.
      *
-     * Total al cliente = valor base digitado + comisión del Excel.
+     * Total al cliente = valor base digitado + comisión de la franja que aplica.
      */
-    private CotizacionServicioBase mostrarDialogoServicioConValorBase(
-            String tituloDialogo, String nombreProducto, String etiquetaValorBase, double comision) {
+    private CotizacionServicioPorRango mostrarDialogoServicioPorRango(
+            String tituloDialogo, String etiquetaValorBase, List<Producto> franjas) {
 
         final JDialog dialogo = new JDialog(vista, tituloDialogo, Dialog.ModalityType.APPLICATION_MODAL);
         dialogo.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        dialogo.setSize(440, 330);
+        dialogo.setSize(460, 340);
         dialogo.setLocationRelativeTo(vista);
         dialogo.setResizable(false);
 
@@ -1014,11 +1073,8 @@ public class VentasController {
         lblTitulo.setFont(new Font("Segoe UI", Font.BOLD, 18));
         lblTitulo.setForeground(MainFrame.COLOR_OSCURO);
 
-        JLabel lblProducto = new JLabel("Producto: " + nombreProducto);
-        lblProducto.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-
-        JLabel lblComision = new JLabel(String.format("Comisión por servicio (Precio Unitario Excel): $%,.2f", comision));
-        lblComision.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        JLabel lblComision = new JLabel("Escriba el monto para calcular la comisión según la franja que le corresponda.");
+        lblComision.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         lblComision.setForeground(MainFrame.COLOR_PRIMARIO_DARK);
 
         JTextField txtValorBase = new JTextField();
@@ -1034,8 +1090,6 @@ public class VentasController {
 
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
         panelForm.add(lblTitulo, gbc);
-        gbc.gridy++;
-        panelForm.add(lblProducto, gbc);
         gbc.gridy++;
         panelForm.add(lblComision, gbc);
 
@@ -1069,16 +1123,29 @@ public class VentasController {
         panelPrincipal.add(panelAcciones, BorderLayout.SOUTH);
         dialogo.setContentPane(panelPrincipal);
 
-        final CotizacionServicioBase[] resultado = new CotizacionServicioBase[1];
+        final CotizacionServicioPorRango[] resultado = new CotizacionServicioPorRango[1];
 
         Runnable recalcular = () -> {
             try {
                 double valorBase = parsearMontoFlexible(txtValorBase.getText());
                 if (valorBase < 0) throw new NumberFormatException();
 
-                double total = redondearAPesosColombianos(valorBase + comision);
+                Producto franja = franjas.stream().filter(p -> p.aplicaParaMonto(valorBase)).findFirst().orElse(null);
+
+                if (franja == null) {
+                    lblComision.setText("No hay ninguna franja configurada que cubra ese monto.");
+                    lblDetalle.setText("Revise las columnas Monto Mínimo/Máximo de este servicio en el Excel.");
+                    lblResultado.setText("TOTAL AL CLIENTE: $0,00");
+                    lblResultado.setForeground(MainFrame.COLOR_PELIGRO);
+                    return;
+                }
+
+                double comisionAplicada = franja.getPrecio();
+                double total = redondearAPesosColombianos(valorBase + comisionAplicada);
+
+                lblComision.setText(String.format("Franja aplicada: %s  →  Comisión: $%,.2f", franja.getNombre(), comisionAplicada));
                 lblDetalle.setText(String.format("Valor base: $%,.2f  +  Comisión: $%,.2f  =  $%,.0f (redondeado)",
-                        valorBase, comision, total));
+                        valorBase, comisionAplicada, total));
                 lblResultado.setText(String.format("TOTAL AL CLIENTE: $%,.0f", total));
                 lblResultado.setForeground(MainFrame.COLOR_EXITO);
             } catch (Exception ex) {
@@ -1102,8 +1169,19 @@ public class VentasController {
                 double valorBase = parsearMontoFlexible(txtValorBase.getText());
                 if (valorBase < 0) throw new NumberFormatException();
 
-                double total = redondearAPesosColombianos(valorBase + comision);
-                resultado[0] = new CotizacionServicioBase(valorBase, comision, total);
+                Producto franja = franjas.stream().filter(p -> p.aplicaParaMonto(valorBase)).findFirst().orElse(null);
+                if (franja == null) {
+                    JOptionPane.showMessageDialog(dialogo,
+                            "Ese monto no cae dentro de ninguna franja configurada para este servicio.\n"
+                            + "Revise las columnas Monto Mínimo/Máximo en el Excel.",
+                            "Sin franja configurada",
+                            JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+
+                double comisionAplicada = franja.getPrecio();
+                double total = redondearAPesosColombianos(valorBase + comisionAplicada);
+                resultado[0] = new CotizacionServicioPorRango(valorBase, comisionAplicada, total, franja);
                 dialogo.dispose();
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(dialogo,
@@ -1300,7 +1378,7 @@ public class VentasController {
         acumuladoTotalDia += totalGeneral;
 
         if (registroVentasDelDia.size() == 1) {
-            vista.getTxtConsolaVentas().setText("");
+            vista.limpiarConsola();
         }
 
         String descPagoLog = metodoPago;
@@ -1308,10 +1386,8 @@ public class VentasController {
             descPagoLog = String.format("Mixto (Ef: $%.0f | Tr: $%.0f)", abonadoEfectivo, abonadoTransferencia);
         }
 
-        String lineaConsola = String.format("• [%s] Venta #%03d | Total: $%.2f | Pago: %s\n",
-                hora, contadorFacturas, totalGeneral, descPagoLog);
-        vista.getTxtConsolaVentas().append(lineaConsola);
-        vista.getTxtConsolaVentas().setCaretPosition(vista.getTxtConsolaVentas().getDocument().getLength());
+        vista.agregarLogConsola(String.format("Venta #%03d | Total: $%.2f | Pago: %s",
+                contadorFacturas, totalGeneral, descPagoLog));
 
         modeloInventario.descontarStockExcel(itemsVendidos, vista);
         actualizarIndicadorInventario();
@@ -2097,12 +2173,40 @@ public class VentasController {
         // como "Program Files" puede producir el error de Windows "No hay
         // suficientes recursos de memoria disponibles para procesar este
         // comando" (un bug conocido de cmd.exe, no un problema real de RAM).
+        //
+        // Después de que el instalador termina, el .exe puede tardar un
+        // instante en quedar disponible (el instalador todavía lo está
+        // escribiendo a disco, o el antivirus lo está escaneando). Por eso
+        // NO se relanza de inmediato: se espera en un bucle a que el archivo
+        // exista de verdad, hasta 20 segundos, antes de abrirlo. Si aun así
+        // no aparece, queda un registro en el log para poder diagnosticarlo
+        // (antes simplemente fallaba en silencio y el programa no volvía a
+        // abrirse).
         File scriptTemporal = new File(System.getProperty("java.io.tmpdir"), "actualizar_papeleria.bat");
+        File archivoLog = new File(System.getProperty("java.io.tmpdir"), "actualizar_papeleria_log.txt");
         String contenidoScript =
                 "@echo off\r\n"
-                + "timeout /t 2 /nobreak >nul\r\n"
+                + "setlocal\r\n"
+                + "set \"LOG=" + archivoLog.getAbsolutePath() + "\"\r\n"
+                + "echo [%date% %time%] Iniciando actualizacion a la version " + version + "> \"%LOG%\"\r\n"
+                + "timeout /t 3 /nobreak >nul\r\n"
+                + "echo [%date% %time%] Ejecutando instalador silencioso>> \"%LOG%\"\r\n"
                 + "\"" + archivoInstalador.getAbsolutePath() + "\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART\r\n"
+                + "echo [%date% %time%] Instalador finalizado (codigo %errorlevel%)>> \"%LOG%\"\r\n"
+                + "set intentos=0\r\n"
+                + ":esperar_ejecutable\r\n"
+                + "if exist \"" + rutaEjecutableActual + "\" goto ejecutable_listo\r\n"
+                + "set /a intentos+=1\r\n"
+                + "if %intentos% GEQ 20 (\r\n"
+                + "  echo [%date% %time%] El ejecutable no aparecio despues de 20 segundos, se cancela el relanzamiento automatico>> \"%LOG%\"\r\n"
+                + "  goto fin\r\n"
+                + ")\r\n"
+                + "timeout /t 1 /nobreak >nul\r\n"
+                + "goto esperar_ejecutable\r\n"
+                + ":ejecutable_listo\r\n"
+                + "echo [%date% %time%] Relanzando la aplicacion actualizada>> \"%LOG%\"\r\n"
                 + "start \"\" \"" + rutaEjecutableActual + "\"\r\n"
+                + ":fin\r\n"
                 + "(goto) 2>nul & del \"%~f0\"\r\n";
 
         try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
@@ -2173,7 +2277,7 @@ public class VentasController {
                 String versionRemota = lineas[0].trim();
                 String urlDescarga = lineas.length > 1 ? lineas[1].trim() : "";
 
-                String versionLocalLimpia = VERSION_SOFTWARE.replaceFirst("^[vV]", "");
+                String versionLocalLimpia = MainFrame.VERSION_SOFTWARE.replaceFirst("^[vV]", "");
                 boolean hayNueva = esVersionMasNueva(versionRemota, versionLocalLimpia);
 
                 SwingUtilities.invokeLater(() -> {
@@ -2340,7 +2444,7 @@ public class VentasController {
                                  DOCUMENTO OFICIAL DE CONTROL INTERNO               
                 ====================================================================
                 """,
-            anioActual, fechaHoraEmision, this.nombreEmpleado.toUpperCase(), VERSION_SOFTWARE,
+            anioActual, fechaHoraEmision, this.nombreEmpleado.toUpperCase(), MainFrame.VERSION_SOFTWARE,
             (contadorFacturas - 1), acumuladoTotalDia, ((contadorFacturas - 1) > 0 ? acumuladoTotalDia / (contadorFacturas - 1) : 0.0),
             acumuladoCostoMayoristaDia, acumuladoPagosEmpleadosDia, (acumuladoCostoMayoristaDia + acumuladoPagosEmpleadosDia),
             gananciaNeta, margenUtilidad, acumuladoEfectivo, acumuladoTransferencia
@@ -2967,7 +3071,7 @@ public class VentasController {
         panelVersion.setOpaque(false);
         panelVersion.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JLabel lblVersion = new JLabel("Versión actual del software: " + VERSION_SOFTWARE);
+        JLabel lblVersion = new JLabel("Versión actual del software: " + MainFrame.VERSION_SOFTWARE);
         lblVersion.setFont(new Font("Segoe UI", Font.BOLD, 13));
 
         JButton btnBuscarUpdates = new JButton("Buscar Actualizaciones");

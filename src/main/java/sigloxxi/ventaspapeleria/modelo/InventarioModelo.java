@@ -487,7 +487,22 @@ public class InventarioModelo {
                             int cantidadVal = obtenerCantidadCelda(celdaCantidad, evaluator);
                             String ubicacionVal = obtenerValorCelda(celdaUbicacion, evaluator).trim();
 
-                            resultados.add(new Producto(codigoVal, nombreVal, precioVal, costoMayoristaVal, cantidadVal, ubicacionVal));
+                            Producto producto = new Producto(codigoVal, nombreVal, precioVal, costoMayoristaVal, cantidadVal, ubicacionVal);
+
+                            // Columnas K (Monto Mínimo) y L (Monto Máximo): opcionales,
+                            // usadas por productos-franja de servicios por rango (ej:
+                            // "PAGOS DE FACTURAS 200", "RETIROS / RECARGAS NEQUI +100").
+                            Cell celdaMontoMinimo = row.getCell(10);
+                            Cell celdaMontoMaximo = row.getCell(11);
+                            String montoMinimoTexto = obtenerValorCelda(celdaMontoMinimo, evaluator).trim();
+                            String montoMaximoTexto = obtenerValorCelda(celdaMontoMaximo, evaluator).trim();
+                            if (!montoMinimoTexto.isEmpty() || !montoMaximoTexto.isEmpty()) {
+                                double montoMinimo = montoMinimoTexto.isEmpty() ? 0.0 : obtenerPrecioCelda(celdaMontoMinimo, evaluator);
+                                double montoMaximo = montoMaximoTexto.isEmpty() ? Double.MAX_VALUE : obtenerPrecioCelda(celdaMontoMaximo, evaluator);
+                                producto.configurarRango(montoMinimo, montoMaximo);
+                            }
+
+                            resultados.add(producto);
                         }
                     }
                 }
@@ -497,6 +512,7 @@ public class InventarioModelo {
         }
         return resultados;
     }
+
 
     public void descontarStockExcel(List<Object[]> itemsVendidos, Component parent) {
         File archivoExcel = obtenerArchivoExcel(parent);

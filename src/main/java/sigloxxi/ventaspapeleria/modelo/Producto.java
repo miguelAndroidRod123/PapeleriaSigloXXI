@@ -8,6 +8,15 @@ public class Producto {
     private int cantidadDisponible;
     private String ubicacion;
 
+    // Rango de monto opcional (columnas "Monto Mínimo" / "Monto Máximo" del
+    // Excel). Se usa en productos-franja como "PAGOS DE FACTURAS 200" o
+    // "RETIROS / RECARGAS NEQUI +100": cada franja es una fila de producto
+    // normal, con su propio Precio Unitario (la comisión de esa franja), y
+    // estos dos valores delimitan a qué monto de transacción aplica.
+    private boolean tieneRangoConfigurado = false;
+    private double montoMinimoRango = 0;
+    private double montoMaximoRango = 0;
+
     public Producto(String codigo, String nombre, double precio, double costoMayorista, int cantidadDisponible, String ubicacion) {
         this.codigo = codigo != null ? codigo : "";
         this.nombre = nombre != null ? nombre : "";
@@ -15,6 +24,22 @@ public class Producto {
         this.costoMayorista = costoMayorista;
         this.cantidadDisponible = cantidadDisponible;
         this.ubicacion = ubicacion != null ? ubicacion : "";
+    }
+
+    /** Marca este producto como una franja de un servicio por rango (ver Monto Mínimo/Máximo del Excel). */
+    public void configurarRango(double montoMinimo, double montoMaximo) {
+        this.montoMinimoRango = montoMinimo;
+        this.montoMaximoRango = montoMaximo;
+        this.tieneRangoConfigurado = true;
+    }
+
+    public boolean tieneRangoConfigurado() { return tieneRangoConfigurado; }
+    public double getMontoMinimoRango() { return montoMinimoRango; }
+    public double getMontoMaximoRango() { return montoMaximoRango; }
+
+    /** True si este producto es la franja correcta para cobrar un monto/transacción dado. */
+    public boolean aplicaParaMonto(double monto) {
+        return tieneRangoConfigurado && monto >= montoMinimoRango && monto <= montoMaximoRango;
     }
 
     public boolean esServicioONoAplica() {
